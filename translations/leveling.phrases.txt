@@ -1,0 +1,293 @@
+"Phrases"
+{
+    // ============================================================================
+    // GENERAL
+    // ============================================================================
+
+    "DataNotLoaded"
+    {
+        "en"    "{green}[Leveling]{default} Your data is still loading, please wait."
+        "es"    "{green}[Nivelación]{default} Tus datos aún se están cargando, por favor espera."
+        "ru"    "{green}[Уровень]{default} Ваши данные загружаются, подождите."
+        "de"    "{green}[Leveling]{default} Deine Daten werden noch geladen, bitte warte."
+        "fr"    "{green}[Niveau]{default} Vos données sont en cours de chargement, veuillez patienter."
+        "pt"    "{green}[Nivelamento]{default} Seus dados ainda estão carregando, aguarde."
+    }
+
+    // ============================================================================
+    // LEVEL UP & XP
+    // ============================================================================
+
+    "LevelUp"
+    {
+        "#format"   "{1:N},{2:d}"
+        "en"        "{green}[Leveling]{default} {teamcolor}{1}{default} has reached level {green}{2}{default}!"
+        "es"        "{green}[Nivelación]{default} {teamcolor}{1}{default} ha alcanzado el nivel {green}{2}{default}!"
+        "ru"        "{green}[Уровень]{default} {teamcolor}{1}{default} достиг уровня {green}{2}{default}!"
+        "de"        "{green}[Leveling]{default} {teamcolor}{1}{default} hat Level {green}{2}{default} erreicht!"
+        "fr"        "{green}[Niveau]{default} {teamcolor}{1}{default} a atteint le niveau {green}{2}{default}!"
+        "pt"        "{green}[Nivelamento]{default} {teamcolor}{1}{default} alcançou o nível {green}{2}{default}!"
+    }
+
+    "LevelInfo"
+    {
+        "#format"   "{1:d},{2:d},{3:d},{4:d},{5:d},{6:d}"
+        "en"        "{green}[Leveling]{default} Level {green}{1}{default} | XP: {green}{2}/{3}{default} | Kills: {green}{4}{default} | Playtime: {green}{5}h {6}m"
+        "es"        "{green}[Nivelación]{default} Nivel {green}{1}{default} | XP: {green}{2}/{3}{default} | Kills: {green}{4}{default} | Tiempo: {green}{5}h {6}m"
+        "ru"        "{green}[Уровень]{default} Уровень {green}{1}{default} | XP: {green}{2}/{3}{default} | Убийства: {green}{4}{default} | Время: {green}{5}ч {6}м"
+        "de"        "{green}[Leveling]{default} Level {green}{1}{default} | XP: {green}{2}/{3}{default} | Kills: {green}{4}{default} | Spielzeit: {green}{5}Std {6}Min"
+        "fr"        "{green}[Niveau]{default} Niveau {green}{1}{default} | XP: {green}{2}/{3}{default} | Kills: {green}{4}{default} | Temps: {green}{5}h {6}m"
+        "pt"        "{green}[Nivelamento]{default} Nível {green}{1}{default} | XP: {green}{2}/{3}{default} | Mortes: {green}{4}{default} | Tempo: {green}{5}h {6}m"
+    }
+
+    "RevengeBonus"
+    {
+        "en"        "{green}[Leveling]{default} {red}Revenge Bonus!{default} {green}+50 XP"
+        "es"        "{green}[Nivelación]{default} {red}¡Bonificación de venganza!{default} {green}+50 XP"
+        "ru"        "{green}[Уровень]{default} {red}Бонус мести!{default} {green}+50 XP"
+        "de"        "{green}[Leveling]{default} {red}Rachebonus!{default} {green}+50 XP"
+        "fr"        "{green}[Niveau]{default} {red}Bonus de vengeance!{default} {green}+50 XP"
+        "pt"        "{green}[Nivelamento]{default} {red}Bônus de vingança!{default} {green}+50 XP"
+    }
+
+    // ============================================================================
+    // ADMIN COMMANDS
+    // ============================================================================
+
+    "GiveXP_Usage"
+    {
+        "en"        "[Leveling] Usage: sm_givexp <player> <amount>"
+        "es"        "[Nivelación] Uso: sm_givexp <jugador> <cantidad>"
+        "ru"        "[Уровень] Использование: sm_givexp <игрок> <количество>"
+        "de"        "[Leveling] Verwendung: sm_givexp <Spieler> <Menge>"
+        "fr"        "[Niveau] Usage: sm_givexp <joueur> <montant>"
+        "pt"        "[Nivelamento] Uso: sm_givexp <jogador> <quantidade>"
+    }
+
+    "GiveXP_Invalid"
+    {
+        "en"        "[Leveling] Amount must be between 1 and 10000."
+        "es"        "[Nivelación] La cantidad debe estar entre 1 y 10000."
+        "ru"        "[Уровень] Количество должно быть от 1 до 10000."
+        "de"        "[Leveling] Betrag muss zwischen 1 und 10000 liegen."
+        "fr"        "[Niveau] Le montant doit être entre 1 et 10000."
+        "pt"        "[Nivelamento] A quantidade deve estar entre 1 e 10000."
+    }
+
+    "GiveXP_Success"
+    {
+        "#format"   "{1:d},{2:N}"
+        "en"        "{green}[Leveling]{default} Gave {green}{1} XP{default} to {teamcolor}{2}"
+        "es"        "{green}[Nivelación]{default} Dado {green}{1} XP{default} a {teamcolor}{2}"
+        "ru"        "{green}[Уровень]{default} Выдано {green}{1} XP{default} игроку {teamcolor}{2}"
+        "de"        "{green}[Leveling]{default} {green}{1} XP{default} an {teamcolor}{2} gegeben"
+        "fr"        "{green}[Niveau]{default} Donné {green}{1} XP{default} à {teamcolor}{2}"
+        "pt"        "{green}[Nivelamento]{default} Dado {green}{1} XP{default} para {teamcolor}{2}"
+    }
+
+    "SetLevel_Usage"
+    {
+        "en"        "[Leveling] Usage: sm_setlevel <player> <level>"
+        "es"        "[Nivelación] Uso: sm_setlevel <jugador> <nivel>"
+        "ru"        "[Уровень] Использование: sm_setlevel <игрок> <уровень>"
+        "de"        "[Leveling] Verwendung: sm_setlevel <Spieler> <Level>"
+        "fr"        "[Niveau] Usage: sm_setlevel <joueur> <niveau>"
+        "pt"        "[Nivelamento] Uso: sm_setlevel <jogador> <nível>"
+    }
+
+    "SetLevel_Invalid"
+    {
+        "#format"   "{1:d}"
+        "en"        "[Leveling] Level must be between 1 and {1}."
+        "es"        "[Nivelación] El nivel debe estar entre 1 y {1}."
+        "ru"        "[Уровень] Уровень должен быть от 1 до {1}."
+        "de"        "[Leveling] Level muss zwischen 1 und {1} liegen."
+        "fr"        "[Niveau] Le niveau doit être entre 1 et {1}."
+        "pt"        "[Nivelamento] O nível deve estar entre 1 e {1}."
+    }
+
+    "SetLevel_Success"
+    {
+        "#format"   "{1:N},{2:d}"
+        "en"        "{green}[Leveling]{default} Set {teamcolor}{1}{default}'s level to {green}{2}"
+        "es"        "{green}[Nivelación]{default} Nivel de {teamcolor}{1}{default} establecido a {green}{2}"
+        "ru"        "{green}[Уровень]{default} Уровень {teamcolor}{1}{default} установлен на {green}{2}"
+        "de"        "{green}[Leveling]{default} Level von {teamcolor}{1}{default} auf {green}{2} gesetzt"
+        "fr"        "{green}[Niveau]{default} Niveau de {teamcolor}{1}{default} défini à {green}{2}"
+        "pt"        "{green}[Nivelamento]{default} Nível de {teamcolor}{1}{default} definido para {green}{2}"
+    }
+
+    "SetLevel_Notify"
+    {
+        "#format"   "{1:d}"
+        "en"        "{green}[Leveling]{default} Your level has been set to {green}{1}{default} by an admin."
+        "es"        "{green}[Nivelación]{default} Tu nivel ha sido establecido a {green}{1}{default} por un admin."
+        "ru"        "{green}[Уровень]{default} Ваш уровень установлен на {green}{1}{default} администратором."
+        "de"        "{green}[Leveling]{default} Dein Level wurde von einem Admin auf {green}{1}{default} gesetzt."
+        "fr"        "{green}[Niveau]{default} Votre niveau a été défini à {green}{1}{default} par un admin."
+        "pt"        "{green}[Nivelamento]{default} Seu nível foi definido para {green}{1}{default} por um admin."
+    }
+
+    "ResetLevel_Usage"
+    {
+        "en"        "[Leveling] Usage: sm_resetlevel <player>"
+        "es"        "[Nivelación] Uso: sm_resetlevel <jugador>"
+        "ru"        "[Уровень] Использование: sm_resetlevel <игрок>"
+        "de"        "[Leveling] Verwendung: sm_resetlevel <Spieler>"
+        "fr"        "[Niveau] Usage: sm_resetlevel <joueur>"
+        "pt"        "[Nivelamento] Uso: sm_resetlevel <jogador>"
+    }
+
+    "ResetLevel_Success"
+    {
+        "#format"   "{1:N}"
+        "en"        "{green}[Leveling]{default} Reset {teamcolor}{1}{default}'s level and stats."
+        "es"        "{green}[Nivelación]{default} Nivel y estadísticas de {teamcolor}{1}{default} reiniciados."
+        "ru"        "{green}[Уровень]{default} Уровень и статистика {teamcolor}{1}{default} сброшены."
+        "de"        "{green}[Leveling]{default} Level und Statistiken von {teamcolor}{1}{default} zurückgesetzt."
+        "fr"        "{green}[Niveau]{default} Niveau et statistiques de {teamcolor}{1}{default} réinitialisés."
+        "pt"        "{green}[Nivelamento]{default} Nível e estatísticas de {teamcolor}{1}{default} reiniciados."
+    }
+
+    "ResetLevel_Notify"
+    {
+        "en"        "{green}[Leveling]{default} Your level and stats have been reset by an admin."
+        "es"        "{green}[Nivelación]{default} Tu nivel y estadísticas han sido reiniciados por un admin."
+        "ru"        "{green}[Уровень]{default} Ваш уровень и статистика сброшены администратором."
+        "de"        "{green}[Leveling]{default} Dein Level und deine Statistiken wurden von einem Admin zurückgesetzt."
+        "fr"        "{green}[Niveau]{default} Votre niveau et vos statistiques ont été réinitialisés par un admin."
+        "pt"        "{green}[Nivelamento]{default} Seu nível e estatísticas foram reiniciados por um admin."
+    }
+
+    // ============================================================================
+    // COSMETICS
+    // ============================================================================
+
+    "Cosmetics_UnequipAll"
+    {
+        "en"        "{green}[Leveling]{default} All cosmetics unequipped."
+        "es"        "{green}[Nivelación]{default} Todos los cosméticos desequipados."
+        "ru"        "{green}[Уровень]{default} Все косметические предметы сняты."
+        "de"        "{green}[Leveling]{default} Alle Kosmetika abgelegt."
+        "fr"        "{green}[Niveau]{default} Tous les cosmétiques retirés."
+        "pt"        "{green}[Nivelamento]{default} Todos os cosméticos desequipados."
+    }
+
+    "Trail_Equipped"
+    {
+        "#format"   "{1:s}"
+        "en"        "{green}[Leveling]{default} Trail equipped: {green}{1}"
+        "es"        "{green}[Nivelación]{default} Estela equipada: {green}{1}"
+        "ru"        "{green}[Уровень]{default} След экипирован: {green}{1}"
+        "de"        "{green}[Leveling]{default} Spur ausgerüstet: {green}{1}"
+        "fr"        "{green}[Niveau]{default} Traînée équipée: {green}{1}"
+        "pt"        "{green}[Nivelamento]{default} Trilha equipada: {green}{1}"
+    }
+
+    "Aura_Equipped"
+    {
+        "#format"   "{1:s}"
+        "en"        "{green}[Leveling]{default} Aura equipped: {green}{1}"
+        "es"        "{green}[Nivelación]{default} Aura equipada: {green}{1}"
+        "ru"        "{green}[Уровень]{default} Аура экипирована: {green}{1}"
+        "de"        "{green}[Leveling]{default} Aura ausgerüstet: {green}{1}"
+        "fr"        "{green}[Niveau]{default} Aura équipée: {green}{1}"
+        "pt"        "{green}[Nivelamento]{default} Aura equipada: {green}{1}"
+    }
+
+    "Model_Equipped"
+    {
+        "#format"   "{1:s}"
+        "en"        "{green}[Leveling]{default} Model equipped: {green}{1}"
+        "es"        "{green}[Nivelación]{default} Modelo equipado: {green}{1}"
+        "ru"        "{green}[Уровень]{default} Модель экипирована: {green}{1}"
+        "de"        "{green}[Leveling]{default} Modell ausgerüstet: {green}{1}"
+        "fr"        "{green}[Niveau]{default} Modèle équipé: {green}{1}"
+        "pt"        "{green}[Nivelamento]{default} Modelo equipado: {green}{1}"
+    }
+
+    // ============================================================================
+    // VIP
+    // ============================================================================
+
+    "VIP_NoPermission"
+    {
+        "en"        "{green}[Leveling]{default} This feature is VIP-only."
+        "es"        "{green}[Nivelación]{default} Esta función es solo para VIP."
+        "ru"        "{green}[Уровень]{default} Эта функция только для VIP."
+        "de"        "{green}[Leveling]{default} Diese Funktion ist nur für VIPs."
+        "fr"        "{green}[Niveau]{default} Cette fonctionnalité est réservée aux VIP."
+        "pt"        "{green}[Nivelamento]{default} Este recurso é exclusivo para VIP."
+    }
+
+    "VIP_WelcomeSet"
+    {
+        "en"        "{green}[Leveling]{default} Custom welcome message set!"
+        "es"        "{green}[Nivelación]{default} ¡Mensaje de bienvenida establecido!"
+        "ru"        "{green}[Уровень]{default} Приветственное сообщение установлено!"
+        "de"        "{green}[Leveling]{default} Willkommensnachricht gesetzt!"
+        "fr"        "{green}[Niveau]{default} Message de bienvenue défini!"
+        "pt"        "{green}[Nivelamento]{default} Mensagem de boas-vindas definida!"
+    }
+
+    "VIP_WelcomeCleared"
+    {
+        "en"        "{green}[Leveling]{default} Custom welcome message cleared."
+        "es"        "{green}[Nivelación]{default} Mensaje de bienvenida borrado."
+        "ru"        "{green}[Уровень]{default} Приветственное сообщение очищено."
+        "de"        "{green}[Leveling]{default} Willkommensnachricht gelöscht."
+        "fr"        "{green}[Niveau]{default} Message de bienvenue effacé."
+        "pt"        "{green}[Nivelamento]{default} Mensagem de boas-vindas limpa."
+    }
+
+    "VIP_TagSet"
+    {
+        "en"        "{green}[Leveling]{default} Custom tag set!"
+        "es"        "{green}[Nivelación]{default} ¡Etiqueta personalizada establecida!"
+        "ru"        "{green}[Уровень]{default} Тег установлен!"
+        "de"        "{green}[Leveling]{default} Tag gesetzt!"
+        "fr"        "{green}[Niveau]{default} Tag personnalisé défini!"
+        "pt"        "{green}[Nivelamento]{default} Tag personalizada definida!"
+    }
+
+    "VIP_TagCleared"
+    {
+        "en"        "{green}[Leveling]{default} Custom tag cleared."
+        "es"        "{green}[Nivelación]{default} Etiqueta personalizada borrada."
+        "ru"        "{green}[Уровень]{default} Тег очищен."
+        "de"        "{green}[Leveling]{default} Tag gelöscht."
+        "fr"        "{green}[Niveau]{default} Tag personnalisé effacé."
+        "pt"        "{green}[Nivelamento]{default} Tag personalizada limpa."
+    }
+
+    "VIP_Cooldown"
+    {
+        "#format"   "{1:d}"
+        "en"        "{green}[Leveling]{default} Please wait {1} seconds before changing again."
+        "es"        "{green}[Nivelación]{default} Espera {1} segundos antes de cambiar de nuevo."
+        "ru"        "{green}[Уровень]{default} Подождите {1} секунд."
+        "de"        "{green}[Leveling]{default} Bitte warte {1} Sekunden."
+        "fr"        "{green}[Niveau]{default} Veuillez attendre {1} secondes."
+        "pt"        "{green}[Nivelamento]{default} Aguarde {1} segundos."
+    }
+
+    "VIP_InvalidMessage"
+    {
+        "en"        "{green}[Leveling]{default} Invalid message. Use only letters, numbers, and basic punctuation."
+        "es"        "{green}[Nivelación]{default} Mensaje inválido. Usa solo letras, números y puntuación básica."
+        "ru"        "{green}[Уровень]{default} Недопустимое сообщение."
+        "de"        "{green}[Leveling]{default} Ungültige Nachricht."
+        "fr"        "{green}[Niveau]{default} Message invalide."
+        "pt"        "{green}[Nivelamento]{default} Mensagem inválida."
+    }
+
+    "VIP_InvalidTag"
+    {
+        "en"        "{green}[Leveling]{default} Invalid tag. Use only letters, numbers, and basic punctuation."
+        "es"        "{green}[Nivelación]{default} Etiqueta inválida."
+        "ru"        "{green}[Уровень]{default} Недопустимый тег."
+        "de"        "{green}[Leveling]{default} Ungültiger Tag."
+        "fr"        "{green}[Niveau]{default} Tag invalide."
+        "pt"        "{green}[Nivelamento]{default} Tag inválida."
+    }
+}
