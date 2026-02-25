@@ -4,7 +4,7 @@
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
 [![SourceMod](https://img.shields.io/badge/SourceMod-1.12-orange?style=for-the-badge)](https://www.sourcemod.net/)
-[![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL%20v3-green?style=for-the-badge)](LICENSE)
 
 A modular XP and leveling system for TF2 servers with cosmetic rewards, chat tags, and VIP features.
 
@@ -337,6 +337,10 @@ To add a language, edit `translations/leveling.phrases.txt` and add your languag
 - **[Color Variables](https://github.com/KissLick/ColorVariables)** by KissLick / Drixevel
 
 ---
+
+## License
+
+GPL v3.0 — see [LICENSE](LICENSE).
 
 <div align="center">
 
