@@ -338,10 +338,6 @@ To add a language, edit `translations/leveling.phrases.txt` and add your languag
 
 ---
 
-## License
-
-MIT — see [LICENSE](LICENSE).
-
 <div align="center">
 
 [Report Bug](https://github.com/Silorak/TF2-Leveling-System/issues) · [Request Feature](https://github.com/Silorak/TF2-Leveling-System/issues)
