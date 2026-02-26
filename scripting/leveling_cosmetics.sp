@@ -25,14 +25,20 @@ enum struct CosmeticItem
     char name[64];
     char value[128];
     int level;
+    
+    // Optional properties for trails
+    char color[32];
+    float startwidth;
+    float endwidth;
+    float lifetime;
 }
 
 ArrayList g_TrailList;
 ArrayList g_AuraList;
 ArrayList g_ModelList;
 
-int  g_iTrailEntity[MAXPLAYERS + 1] = { -1, ... };
-int  g_iAuraEntity[MAXPLAYERS + 1]  = { -1, ... };
+int  g_iTrailEntity[MAXPLAYERS + 1] = { INVALID_ENT_REFERENCE, ... };
+int  g_iAuraEntity[MAXPLAYERS + 1]  = { INVALID_ENT_REFERENCE, ... };
 bool g_bHasCustomModel[MAXPLAYERS + 1];
 
 public void OnPluginStart()
@@ -58,6 +64,7 @@ public void OnMapStart()
 public void OnClientDisconnect(int client)
 {
     RemoveAllCosmetics(client);
+    g_bHasCustomModel[client] = false;
 }
 
 public void Leveling_OnDataLoaded(int client)
@@ -71,6 +78,25 @@ public Action Event_PlayerSpawn(Event event, const char[] name, bool dontBroadca
     int client = GetClientOfUserId(event.GetInt("userid"));
     if (client > 0 && IsPlayerAlive(client) && Leveling_IsDataLoaded(client))
         ApplyCosmetics(client);
+    return Plugin_Continue;
+}
+
+public void OnEntityCreated(int entity, const char[] classname)
+{
+    if (StrEqual(classname, "tf_wearable") || StrEqual(classname, "tf_powerup_bottle"))
+    {
+        SDKHook(entity, SDKHook_SetTransmit, Hook_WearableTransmit);
+    }
+}
+
+public Action Hook_WearableTransmit(int entity, int client)
+{
+    int owner = GetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity");
+    
+    // Only hide wearables for players using a custom model
+    if (owner > 0 && owner <= MaxClients && g_bHasCustomModel[owner])
+        return Plugin_Handled;
+    
     return Plugin_Continue;
 }
 
@@ -123,10 +149,39 @@ void CreateTrail(int client, const char[] material)
     if (trail == -1) return;
 
     DispatchKeyValue(trail, "spritename", material);
-    DispatchKeyValue(trail, "startwidth", "20.0");
-    DispatchKeyValue(trail, "endwidth", "1.0");
-    DispatchKeyValue(trail, "lifetime", "2.0");
-    DispatchKeyValue(trail, "rendercolor", "255 255 255");
+    
+    // Default values if we can't find the trail in our config
+    char color[32] = "255 255 255";
+    float startwidth = 20.0;
+    float endwidth = 1.0;
+    float lifetime = 2.0;
+
+    // Look up the trail properties
+    for (int i = 0; i < g_TrailList.Length; i++)
+    {
+        CosmeticItem item;
+        g_TrailList.GetArray(i, item);
+        if (StrEqual(item.value, material))
+        {
+            strcopy(color, sizeof(color), item.color);
+            startwidth = item.startwidth;
+            endwidth = item.endwidth;
+            lifetime = item.lifetime;
+            break;
+        }
+    }
+    
+    char buffer[16];
+    FloatToString(startwidth, buffer, sizeof(buffer));
+    DispatchKeyValue(trail, "startwidth", buffer);
+    
+    FloatToString(endwidth, buffer, sizeof(buffer));
+    DispatchKeyValue(trail, "endwidth", buffer);
+    
+    FloatToString(lifetime, buffer, sizeof(buffer));
+    DispatchKeyValue(trail, "lifetime", buffer);
+    
+    DispatchKeyValue(trail, "rendercolor", color);
     DispatchKeyValue(trail, "rendermode", "5");
     DispatchSpawn(trail);
 
@@ -138,14 +193,18 @@ void CreateTrail(int client, const char[] material)
     SetVariantString("!activator");
     AcceptEntityInput(trail, "SetParent", client);
 
-    g_iTrailEntity[client] = trail;
+    g_iTrailEntity[client] = EntIndexToEntRef(trail);
 }
 
 void RemoveTrail(int client)
 {
-    if (g_iTrailEntity[client] != -1 && IsValidEntity(g_iTrailEntity[client]))
-        AcceptEntityInput(g_iTrailEntity[client], "Kill");
-    g_iTrailEntity[client] = -1;
+    if (g_iTrailEntity[client] != INVALID_ENT_REFERENCE)
+    {
+        int entity = EntRefToEntIndex(g_iTrailEntity[client]);
+        if (entity != INVALID_ENT_REFERENCE)
+            AcceptEntityInput(entity, "Kill");
+    }
+    g_iTrailEntity[client] = INVALID_ENT_REFERENCE;
 }
 
 // ============================================================================
@@ -167,7 +226,7 @@ void CreateAura(int client, const char[] particleName)
     SetVariantString("!activator");
     AcceptEntityInput(particle, "SetParent", client);
 
-    g_iAuraEntity[client] = particle;
+    g_iAuraEntity[client] = EntIndexToEntRef(particle);
     SDKHook(particle, SDKHook_SetTransmit, Hook_AuraTransmit);
 }
 
@@ -179,9 +238,13 @@ public Action Hook_AuraTransmit(int entity, int client)
 
 void RemoveAura(int client)
 {
-    if (g_iAuraEntity[client] != -1 && IsValidEntity(g_iAuraEntity[client]))
-        AcceptEntityInput(g_iAuraEntity[client], "Kill");
-    g_iAuraEntity[client] = -1;
+    if (g_iAuraEntity[client] != INVALID_ENT_REFERENCE)
+    {
+        int entity = EntRefToEntIndex(g_iAuraEntity[client]);
+        if (entity != INVALID_ENT_REFERENCE)
+            AcceptEntityInput(entity, "Kill");
+    }
+    g_iAuraEntity[client] = INVALID_ENT_REFERENCE;
 }
 
 // ============================================================================
@@ -444,7 +507,7 @@ void ParseSection(KeyValues kv, const char[] section, ArrayList list, const char
 {
     if (!kv.JumpToKey(section)) return;
 
-    if (kv.GotoFirstSubKey(true))
+    if (kv.GotoFirstSubKey())
     {
         do
         {
@@ -452,9 +515,19 @@ void ParseSection(KeyValues kv, const char[] section, ArrayList list, const char
             kv.GetSectionName(item.name, sizeof(item.name));
             item.level = kv.GetNum("level");
             kv.GetString(valueKey, item.value, sizeof(item.value));
+            
+            // Optional Trail parameters (with defaults)
+            if (StrEqual(section, "Trails"))
+            {
+                kv.GetString("color", item.color, sizeof(item.color), "255 255 255");
+                item.startwidth = kv.GetFloat("startwidth", 20.0);
+                item.endwidth = kv.GetFloat("endwidth", 1.0);
+                item.lifetime = kv.GetFloat("lifetime", 2.0);
+            }
+            
             list.PushArray(item);
         }
-        while (kv.GotoNextKey(false));
+        while (kv.GotoNextKey());
         kv.GoBack(); // back to section level
     }
     kv.GoBack(); // back to root
