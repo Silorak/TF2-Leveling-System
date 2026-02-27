@@ -16,7 +16,7 @@
 #define _leveling_included
 
 #define LEVELING_MAX_LEVEL    50
-#define LEVELING_VERSION      "3.0.0"
+#define LEVELING_VERSION      "1.1.0"
 
 // ============================================================================
 // ENUMS

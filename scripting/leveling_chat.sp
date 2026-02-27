@@ -7,7 +7,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Chat Tags"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.1.0"
 
 #if !defined MAXLENGTH_NAME
 #define MAXLENGTH_NAME 128
@@ -25,17 +25,23 @@ public Plugin myinfo =
 enum struct LevelTag
 {
     int level;
+    int flag; // Admin flag required (0 = none, available to all)
     char tag[64];
 }
 
 ArrayList g_TagList;
 
-// Cached processed tags per client (rebuilt on level up or tag change)
+// Cached tag per client — stored in raw {#RRGGBB} format,
+// Chat Processor's CProcessVariables handles the color conversion.
 char g_CachedTag[MAXPLAYERS + 1][128];
 
 public void OnPluginStart()
 {
     g_TagList = new ArrayList(sizeof(LevelTag));
+    LoadTranslations("leveling.phrases");
+
+    RegConsoleCmd("sm_tags", Command_Tags, "Select an unlocked chat tag");
+    RegConsoleCmd("sm_tag",  Command_Tags, "Select an unlocked chat tag");
 }
 
 public void OnMapStart()
@@ -67,14 +73,118 @@ public Action CP_OnChatMessage(int& author, ArrayList recipients, char[] flagstr
     if (author <= 0 || !IsClientInGame(author)) return Plugin_Continue;
     if (!Leveling_IsDataLoaded(author)) return Plugin_Continue;
 
-    if (g_CachedTag[author][0] == '\0')
-        RebuildCachedTag(author);
+    // Always rebuild — it's cheap (a few string checks + small array scan)
+    // and guarantees VIP tag changes, !tags equips, and level-ups are
+    // immediately reflected without needing extra forwards.
+    RebuildCachedTag(author);
 
-    char newName[128];
-    Format(newName, sizeof(newName), "%s %s", g_CachedTag[author], name);
+    // Empty = no tags config loaded
+    if (g_CachedTag[author][0] == '\0')
+        return Plugin_Continue;
+
+    // Prepend tag to name.
+    // We keep {#RRGGBB} format here — Chat Processor's CProcessVariables
+    // will convert them to real color bytes when processcolors = true.
+    // {default} resets color back to team color for the player name.
+    char newName[MAXLENGTH_NAME];
+    Format(newName, sizeof(newName), "%s {default}%s", g_CachedTag[author], name);
     strcopy(name, MAXLENGTH_NAME, newName);
 
+    processcolors = true;
     return Plugin_Changed;
+}
+
+// ============================================================================
+// TAG SELECTION MENU (!tags / !tag)
+// ============================================================================
+
+public Action Command_Tags(int client, int args)
+{
+    if (client == 0) return Plugin_Handled;
+    if (!Leveling_IsDataLoaded(client))
+    {
+        CPrintToChat(client, "%t", "DataNotLoaded");
+        return Plugin_Handled;
+    }
+
+    int playerLevel = Leveling_GetLevel(client);
+
+    Menu menu = new Menu(Handler_TagMenu);
+    menu.SetTitle("Select Chat Tag (Level %d)", playerLevel);
+
+    // "Auto" option — always use highest unlocked tag
+    menu.AddItem("auto", "Auto (Highest Unlocked)");
+
+    for (int i = 0; i < g_TagList.Length; i++)
+    {
+        LevelTag entry;
+        g_TagList.GetArray(i, entry);
+
+        char info[16], display[128], stripped[64];
+        IntToString(entry.level, info, sizeof(info));
+        StripColorTags(entry.tag, stripped, sizeof(stripped));
+
+        bool hasLevel = (entry.level <= playerLevel);
+        bool hasFlag  = (entry.flag == 0 || CheckCommandAccess(client, "sm_tag_flag", entry.flag, true));
+
+        if (hasLevel && hasFlag)
+        {
+            Format(display, sizeof(display), "%s (Lvl %d)", stripped, entry.level);
+            menu.AddItem(info, display);
+        }
+        else
+        {
+            if (!hasFlag)
+                Format(display, sizeof(display), "%s (VIP Only)", stripped);
+            else
+                Format(display, sizeof(display), "%s (Locked - Lvl %d)", stripped, entry.level);
+            menu.AddItem("", display, ITEMDRAW_DISABLED);
+        }
+    }
+
+    menu.Display(client, MENU_TIME_FOREVER);
+    return Plugin_Handled;
+}
+
+public int Handler_TagMenu(Menu menu, MenuAction action, int param1, int param2)
+{
+    if (action == MenuAction_Select)
+    {
+        char info[16];
+        menu.GetItem(param2, info, sizeof(info));
+
+        if (StrEqual(info, "auto"))
+        {
+            // Clear equipped tag — RebuildCachedTag will use highest unlocked
+            Leveling_SetEquipped(param1, Cosmetic_Tag, "");
+            CPrintToChat(param1, "{green}[Leveling]{default} Tag set to auto (highest unlocked).");
+        }
+        else
+        {
+            // Store the level number as the equipped tag identifier
+            Leveling_SetEquipped(param1, Cosmetic_Tag, info);
+
+            int level = StringToInt(info);
+            for (int i = 0; i < g_TagList.Length; i++)
+            {
+                LevelTag entry;
+                g_TagList.GetArray(i, entry);
+                if (entry.level == level)
+                {
+                    char stripped[64];
+                    StripColorTags(entry.tag, stripped, sizeof(stripped));
+                    CPrintToChat(param1, "{green}[Leveling]{default} Tag equipped: {green}%s", stripped);
+                    break;
+                }
+            }
+        }
+
+        // Invalidate cache — next chat message will rebuild with new selection
+        g_CachedTag[param1][0] = '\0';
+        Leveling_SavePlayer(param1);
+    }
+    else if (action == MenuAction_End) delete menu;
+    return 0;
 }
 
 // ============================================================================
@@ -85,34 +195,44 @@ void RebuildCachedTag(int client)
 {
     if (!IsClientInGame(client)) return;
 
-    // Priority 1: Custom VIP tag
+    // Priority 1: Custom VIP tag (set via !customtag)
     char customTag[32];
     Leveling_GetCustomTag(client, customTag, sizeof(customTag));
     if (customTag[0] != '\0')
     {
-        ProcessColors(customTag, g_CachedTag[client], sizeof(g_CachedTag[]));
+        strcopy(g_CachedTag[client], sizeof(g_CachedTag[]), customTag);
         return;
     }
 
-    // Priority 2: Equipped specific tag
+    // Priority 2: Manually equipped tag (set via !tags menu)
     char equippedTag[16];
     Leveling_GetEquipped(client, Cosmetic_Tag, equippedTag, sizeof(equippedTag));
     if (equippedTag[0] != '\0')
     {
         int equippedLevel = StringToInt(equippedTag);
-        for (int i = 0; i < g_TagList.Length; i++)
+        int playerLevel = Leveling_GetLevel(client);
+
+        // Validate the tag is still unlocked and player has flag (handles level reset)
+        if (equippedLevel <= playerLevel)
         {
-            LevelTag entry;
-            g_TagList.GetArray(i, entry);
-            if (entry.level == equippedLevel)
+            for (int i = 0; i < g_TagList.Length; i++)
             {
-                ProcessColors(entry.tag, g_CachedTag[client], sizeof(g_CachedTag[]));
-                return;
+                LevelTag entry;
+                g_TagList.GetArray(i, entry);
+                if (entry.level == equippedLevel)
+                {
+                    bool hasFlag = (entry.flag == 0 || CheckCommandAccess(client, "sm_tag_flag", entry.flag, true));
+                    if (hasFlag)
+                    {
+                        strcopy(g_CachedTag[client], sizeof(g_CachedTag[]), entry.tag);
+                        return;
+                    }
+                }
             }
         }
     }
 
-    // Priority 3: Highest unlocked tag
+    // Priority 3: Highest unlocked tag (auto mode) — must meet level AND flag
     int playerLevel = Leveling_GetLevel(client);
     for (int i = g_TagList.Length - 1; i >= 0; i--)
     {
@@ -120,15 +240,17 @@ void RebuildCachedTag(int client)
         g_TagList.GetArray(i, entry);
         if (entry.level <= playerLevel)
         {
-            ProcessColors(entry.tag, g_CachedTag[client], sizeof(g_CachedTag[]));
-            return;
+            bool hasFlag = (entry.flag == 0 || CheckCommandAccess(client, "sm_tag_flag", entry.flag, true));
+            if (hasFlag)
+            {
+                strcopy(g_CachedTag[client], sizeof(g_CachedTag[]), entry.tag);
+                return;
+            }
         }
     }
 
-    // Fallback
-    char raw[64];
-    Format(raw, sizeof(raw), "{#00FF00}[Lvl %d]", playerLevel);
-    ProcessColors(raw, g_CachedTag[client], sizeof(g_CachedTag[]));
+    // Fallback: generic level tag
+    Format(g_CachedTag[client], sizeof(g_CachedTag[]), "{#00FF00}[Lvl %d]", playerLevel);
 }
 
 // ============================================================================
@@ -159,14 +281,32 @@ void LoadChatTags()
             char levelStr[16];
             kv.GetSectionName(levelStr, sizeof(levelStr));
             entry.level = StringToInt(levelStr);
-            kv.GetString(NULL_STRING, entry.tag, sizeof(entry.tag));
-            g_TagList.PushArray(entry);
+
+            // Check if this is a subsection (has child keys) or a flat key-value
+            // Subsection format: "1" { "tag" "..." "flag" "a" }
+            // Flat format:       "1" "{#00FF00}[Newbie]"
+            if (kv.GetDataType(NULL_STRING) != KvData_None)
+            {
+                // Flat format: value is the tag directly
+                kv.GetString(NULL_STRING, entry.tag, sizeof(entry.tag));
+                entry.flag = 0;
+            }
+            else
+            {
+                // Subsection format: read tag and optional flag
+                kv.GetString("tag", entry.tag, sizeof(entry.tag));
+                char flagStr[16];
+                kv.GetString("flag", flagStr, sizeof(flagStr), "");
+                entry.flag = (flagStr[0] != '\0') ? ReadFlagString(flagStr) : 0;
+            }
+
+            if (entry.tag[0] != '\0')
+                g_TagList.PushArray(entry);
         }
         while (kv.GotoNextKey(false));
     }
     delete kv;
 
-    // Sort by level (first field in struct = int level)
     SortADTArrayCustom(g_TagList, SortTagsByLevel);
 }
 
@@ -180,34 +320,21 @@ public int SortTagsByLevel(int index1, int index2, Handle array, Handle hndl)
 }
 
 // ============================================================================
-// COLOR PROCESSING
+// HELPERS
 // ============================================================================
 
-void ProcessColors(const char[] input, char[] output, int maxlen)
+// Strip {#RRGGBB} color tags for clean menu display text
+void StripColorTags(const char[] input, char[] output, int maxlen)
 {
-    int inputLen = strlen(input);
     int outIdx = 0;
+    int inputLen = strlen(input);
 
     for (int i = 0; i < inputLen && outIdx < maxlen - 1; i++)
     {
         if (input[i] == '{' && i + 8 < inputLen && input[i+1] == '#' && input[i+8] == '}')
         {
-            bool valid = true;
-            for (int h = 2; h <= 7; h++)
-            {
-                char c = input[i+h];
-                if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')))
-                { valid = false; break; }
-            }
-
-            if (valid && outIdx + 7 < maxlen)
-            {
-                output[outIdx++] = '\x07';
-                for (int h = 2; h <= 7; h++)
-                    output[outIdx++] = input[i+h];
-                i += 8; // skip {#RRGGBB}, loop will i++
-                continue;
-            }
+            i += 8;
+            continue;
         }
         output[outIdx++] = input[i];
     }

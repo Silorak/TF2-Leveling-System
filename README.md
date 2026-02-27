@@ -2,7 +2,7 @@
 
 # TF2 Leveling System
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
 [![SourceMod](https://img.shields.io/badge/SourceMod-1.12-orange?style=for-the-badge)](https://www.sourcemod.net/)
 [![License](https://img.shields.io/badge/license-GPL%20v3-green?style=for-the-badge)](LICENSE)
 
@@ -34,9 +34,9 @@ A modular plugin suite built around a shared native API. Each plugin can be load
 
 **Leveling** — 50 levels with configurable exponential XP scaling. XP from kills, revenge bonuses, and a configurable donor multiplier. Auto-save with transaction batching. MySQL and SQLite both supported.
 
-**Chat Tags** — Level-based colored chat tags using `{#RRGGBB}` hex format. Tags are cached on level-up (not processed per-message). Players can equip any tag they've unlocked, or VIPs can set fully custom tags.
+**Chat Tags** — Level-based colored chat tags using `{#RRGGBB}` hex format. Players automatically get their highest unlocked tag, or can manually select any unlocked tag via `!tags`. VIPs can override with fully custom tags via `!customtag`. Colors are processed natively by Chat Processor.
 
-**Cosmetics** — Equip trails (sprite-based), auras (particle effects), and player models simultaneously. Models use TF2's `SetCustomModel` + `m_bUseClassAnimations` pipeline for correct animations. All cosmetics are config-driven.
+**Cosmetics** — Equip trails (sprite-based), auras (particle effects), and player models simultaneously. Trails support per-item color, width, and lifetime configuration. Models use TF2's `SetCustomModel` + `m_bUseClassAnimations` pipeline for correct animations with automatic wearable hiding. All cosmetics are config-driven.
 
 **VIP** — Custom welcome messages with `{RAINBOW}` support and custom chat tags. Requires `ADMFLAG_RESERVATION`. Cooldown-protected, input-validated, persisted to database.
 
@@ -130,10 +130,15 @@ At defaults: Level 1→2 needs 100 XP (10 kills). Level 25→26 needs ~762 XP. L
     "5"     "{#00BFFF}[Regular]"
     "10"    "{#FFD700}[Veteran]"
     "50"    "{#FF00FF}[Legend]"
+    "10"
+    {
+        "tag"   "{#FFD700}[VIP Gold]"
+        "flag"  "a"
+    }
 }
 ```
 
-Players get the highest tag they've unlocked. Colors use `{#RRGGBB}` hex format.
+Tags support two formats: simple (`"level" "tag"`) for everyone, or subsection with `"flag"` for admin-restricted tags. Players see restricted tags as `(VIP Only)` in the `!tags` menu.
 
 ### Cosmetics — `configs/leveling/cosmetics.cfg`
 
@@ -144,8 +149,18 @@ Players get the highest tag they've unlocked. Colors use `{#RRGGBB}` hex format.
     {
         "Red Laser"
         {
-            "level"     "2"
-            "material"  "materials/sprites/laser.vmt"
+            "level"      "2"
+            "material"   "materials/sprites/laser.vmt"
+            "color"      "255 0 0"        // optional, default "255 255 255"
+            "startwidth" "15.0"           // optional, default 20.0
+            "endwidth"   "1.0"            // optional, default 1.0
+            "lifetime"   "2.0"            // optional, default 2.0
+        }
+        "VIP Rainbow Trail"
+        {
+            "level"      "1"
+            "material"   "materials/sprites/laser.vmt"
+            "flag"       "a"              // VIP only (ADMFLAG_RESERVATION)
         }
     }
     "Auras"
@@ -167,6 +182,8 @@ Players get the highest tag they've unlocked. Colors use `{#RRGGBB}` hex format.
 }
 ```
 
+Items with `"flag"` are shown as `(VIP Only)` in the menu for players who don't have the required admin flag. Flag values: `"a"` = reservation (VIP/donor), `"b"` = generic, `"d"` = slay, `"z"` = root.
+
 ### ConVars
 
 | ConVar | Default | Description |
@@ -185,6 +202,7 @@ Players get the highest tag they've unlocked. Colors use `{#RRGGBB}` hex format.
 | `!level` / `sm_level` | Show your level, XP, kills, and playtime |
 | `!rank` / `sm_rank` | Top 10 leaderboard |
 | `!cosmetics` / `sm_equip` | Open cosmetics equip menu |
+| `!tags` / `sm_tags` | Select an unlocked chat tag |
 | `!xphud` / `sm_xphud` | Toggle XP progress bar on/off |
 
 ### VIP (requires `ADMFLAG_RESERVATION`)
@@ -327,6 +345,37 @@ To add a language, edit `translations/leveling.phrases.txt` and add your languag
 **Database errors** — If MySQL fails, the plugin falls back to SQLite automatically. Check `logs/` for connection errors. Verify your `databases.cfg` entry uses the key name `"leveling"`.
 
 **Players T-posing with models** — Make sure you are running `leveling_cosmetics.smx`. It uses the correct `SetCustomModel` + `m_bUseClassAnimations` pipeline.
+
+---
+
+## Changelog
+
+### v1.1.0
+- **Chat:** Added `!tags` / `!tag` command — select any unlocked chat tag from a menu
+- **Chat:** Tags now update instantly when changed (VIP custom tag, equip, level-up)
+- **Chat:** Fixed color processing — `{#RRGGBB}` tags handled by Chat Processor natively
+- **Chat:** Tag priority: VIP custom tag > manually equipped tag > highest unlocked > fallback
+- **Chat:** Admin flag support in `tags.cfg` — restrict tags to VIPs or specific admin groups
+- **Cosmetics:** Admin flag support in `cosmetics.cfg` — VIP-only trails, auras, models
+- **Cosmetics:** Configurable trail properties (color, width, lifetime) per trail
+- **Cosmetics:** Automatic wearable hiding when using custom player models
+- **Cosmetics:** Entity reference safety for trails and auras
+- **Cosmetics:** Fixed KV traversal mismatch in config parsing
+- **VIP:** Welcome message now delayed 5 seconds so players see it after loading in
+- **VIP:** Welcome message now shows player name (`PlayerName: message`)
+- **VIP:** Fixed rainbow colors — `{RAINBOW}` now produces correct `{#RRGGBB}` format
+- **Core:** Fixed MySQL compatibility — `CREATE INDEX IF NOT EXISTS` not supported by MySQL
+- **Core:** Consistent version strings across all plugins
+
+### v1.0.0
+- Initial release — modular subplugin architecture
+- Core with XP/level system, MySQL + SQLite, transaction-batched auto-save
+- Chat tags with hex colors and caching
+- Cosmetics (trails, auras, models) with correct TF2 `SetCustomModel` pipeline
+- VIP custom welcome messages and tags
+- HUD progress bar, floating XP, level-up effects
+- 17 natives, 3 forwards, `CosmeticType` enum, `LevelingPlayer` methodmap
+- 6 language translations (EN, ES, RU, DE, FR, PT)
 
 ---
 
