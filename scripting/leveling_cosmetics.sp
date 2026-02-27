@@ -9,7 +9,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Cosmetics"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.1.0"
 
 public Plugin myinfo =
 {
@@ -25,6 +25,7 @@ enum struct CosmeticItem
     char name[64];
     char value[128];
     int level;
+    int flag; // Admin flag required (0 = none, available to all)
     
     // Optional properties for trails
     char color[32];
@@ -402,14 +403,20 @@ void OpenCosmeticList(int client, CosmeticType type)
             char info[256];
             Format(info, sizeof(info), "%d|%s", view_as<int>(type), item.value);
 
-            if (item.level <= playerLevel)
+            bool hasLevel = (item.level <= playerLevel);
+            bool hasFlag  = (item.flag == 0 || CheckCommandAccess(client, "sm_cosmetic_flag", item.flag, true));
+
+            if (hasLevel && hasFlag)
             {
                 menu.AddItem(info, item.name);
             }
             else
             {
                 char display[128];
-                Format(display, sizeof(display), "%s (Locked - Lvl %d)", item.name, item.level);
+                if (!hasFlag)
+                    Format(display, sizeof(display), "%s (VIP Only)", item.name);
+                else
+                    Format(display, sizeof(display), "%s (Locked - Lvl %d)", item.name, item.level);
                 menu.AddItem("", display, ITEMDRAW_DISABLED);
             }
         }
@@ -515,6 +522,11 @@ void ParseSection(KeyValues kv, const char[] section, ArrayList list, const char
             kv.GetSectionName(item.name, sizeof(item.name));
             item.level = kv.GetNum("level");
             kv.GetString(valueKey, item.value, sizeof(item.value));
+            
+            // Optional admin flag (e.g. "a" for reservation, "b" for generic, etc.)
+            char flagStr[16];
+            kv.GetString("flag", flagStr, sizeof(flagStr), "");
+            item.flag = (flagStr[0] != '\0') ? ReadFlagString(flagStr) : 0;
             
             // Optional Trail parameters (with defaults)
             if (StrEqual(section, "Trails"))

@@ -16,7 +16,7 @@
 #define PLUGIN_NAME        "TF2 Leveling System"
 #define PLUGIN_AUTHOR      "Silorak"
 #define PLUGIN_DESCRIPTION "Core leveling system with XP, levels, and database"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.1.0"
 #define PLUGIN_URL         "https://github.com/Silorak/TF2-Leveling-System"
 
 #define MAX_LEVEL          50
@@ -358,9 +358,26 @@ void DB_Init()
     g_hDatabase.Query(DB_OnGenericQuery, query, _, DBPrio_High);
 
     // Index for top queries
-    g_hDatabase.Format(query, sizeof(query),
-        "CREATE INDEX IF NOT EXISTS idx_level_xp ON %s(level DESC, xp DESC);",
-        TABLE_NAME);
+    // MySQL doesn't support CREATE INDEX IF NOT EXISTS (only MariaDB/SQLite do).
+    // Detect the driver and handle accordingly.
+    char driver[16];
+    g_hDatabase.Driver.GetIdentifier(driver, sizeof(driver));
+
+    if (StrEqual(driver, "mysql", false))
+    {
+        // MySQL: just CREATE INDEX — duplicate key error is non-fatal
+        // and DB_OnGenericQuery already handles errors gracefully.
+        g_hDatabase.Format(query, sizeof(query),
+            "CREATE INDEX idx_level_xp ON %s(level DESC, xp DESC);",
+            TABLE_NAME);
+    }
+    else
+    {
+        // SQLite / MariaDB: IF NOT EXISTS is supported
+        g_hDatabase.Format(query, sizeof(query),
+            "CREATE INDEX IF NOT EXISTS idx_level_xp ON %s(level DESC, xp DESC);",
+            TABLE_NAME);
+    }
     g_hDatabase.Query(DB_OnGenericQuery, query, _, DBPrio_Low);
 }
 
