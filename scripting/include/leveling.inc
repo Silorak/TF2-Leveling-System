@@ -16,7 +16,7 @@
 #define _leveling_included
 
 #define LEVELING_MAX_LEVEL    50
-#define LEVELING_VERSION      "1.1.0"
+#define LEVELING_VERSION      "1.2.0"
 
 // ============================================================================
 // ENUMS
@@ -27,7 +27,10 @@ enum CosmeticType
     Cosmetic_Trail = 0,
     Cosmetic_Aura,
     Cosmetic_Model,
-    Cosmetic_Tag
+    Cosmetic_Tag,
+    Cosmetic_Eye,
+    Cosmetic_Death,
+    Cosmetic_Pet
 }
 
 // ============================================================================

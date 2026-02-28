@@ -6,7 +6,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Visuals"
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.2.0"
 
 #define FFADE_IN 0x0001
 

@@ -206,6 +206,39 @@
         "pt"        "{green}[Nivelamento]{default} Modelo equipado: {green}{1}"
     }
 
+    "Eye_Equipped"
+    {
+        "#format"   "{1:s}"
+        "en"        "{green}[Leveling]{default} Eye effect equipped: {green}{1}"
+        "es"        "{green}[Nivelación]{default} Efecto ocular equipado: {green}{1}"
+        "ru"        "{green}[Уровень]{default} Эффект глаз экипирован: {green}{1}"
+        "de"        "{green}[Leveling]{default} Augeneffekt ausgerüstet: {green}{1}"
+        "fr"        "{green}[Niveau]{default} Effet oculaire équipé: {green}{1}"
+        "pt"        "{green}[Nivelamento]{default} Efeito ocular equipado: {green}{1}"
+    }
+
+    "Death_Equipped"
+    {
+        "#format"   "{1:s}"
+        "en"        "{green}[Leveling]{default} Death effect equipped: {green}{1}"
+        "es"        "{green}[Nivelación]{default} Efecto de muerte equipado: {green}{1}"
+        "ru"        "{green}[Уровень]{default} Эффект смерти экипирован: {green}{1}"
+        "de"        "{green}[Leveling]{default} Todeseffekt ausgerüstet: {green}{1}"
+        "fr"        "{green}[Niveau]{default} Effet de mort équipé: {green}{1}"
+        "pt"        "{green}[Nivelamento]{default} Efeito de morte equipado: {green}{1}"
+    }
+
+    "Pet_Equipped"
+    {
+        "#format"   "{1:s}"
+        "en"        "{green}[Leveling]{default} Pet equipped: {green}{1}"
+        "es"        "{green}[Nivelación]{default} Mascota equipada: {green}{1}"
+        "ru"        "{green}[Уровень]{default} Питомец экипирован: {green}{1}"
+        "de"        "{green}[Leveling]{default} Haustier ausgerüstet: {green}{1}"
+        "fr"        "{green}[Niveau]{default} Animal équipé: {green}{1}"
+        "pt"        "{green}[Nivelamento]{default} Pet equipado: {green}{1}"
+    }
+
     // ============================================================================
     // VIP
     // ============================================================================
