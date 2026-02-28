@@ -16,14 +16,17 @@
 #define PLUGIN_NAME        "TF2 Leveling System"
 #define PLUGIN_AUTHOR      "Silorak"
 #define PLUGIN_DESCRIPTION "Core leveling system with XP, levels, and database"
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.2.0"
 #define PLUGIN_URL         "https://github.com/Silorak/TF2-Leveling-System"
 
 #define MAX_LEVEL          50
 #define TABLE_NAME         "sm_leveling_users"
-#define SCHEMA_VERSION     2
+#define SCHEMA_VERSION     3
 #define MAX_GIVEXP         10000
-#define TF_DEATHFLAG_REVENGE 8
+#define TF_DEATHFLAG_REVENGE     8
+#if !defined TF_DEATHFLAG_DEADRINGER
+#define TF_DEATHFLAG_DEADRINGER  32
+#endif
 
 public Plugin myinfo =
 {
@@ -50,6 +53,9 @@ char   g_sTrail[MAXPLAYERS + 1][64];
 char   g_sAura[MAXPLAYERS + 1][64];
 char   g_sModel[MAXPLAYERS + 1][64];
 char   g_sTag[MAXPLAYERS + 1][16];
+char   g_sEye[MAXPLAYERS + 1][64];
+char   g_sDeath[MAXPLAYERS + 1][64];
+char   g_sPet[MAXPLAYERS + 1][128];
 
 // VIP data (stored in core, read by VIP subplugin)
 char   g_sCustomWelcome[MAXPLAYERS + 1][128];
@@ -185,6 +191,9 @@ void ResetPlayerData(int client)
     g_sAura[client][0]     = '\0';
     g_sModel[client][0]    = '\0';
     g_sTag[client][0]      = '\0';
+    g_sEye[client][0]      = '\0';
+    g_sDeath[client][0]    = '\0';
+    g_sPet[client][0]      = '\0';
     g_sCustomWelcome[client][0] = '\0';
     g_sCustomTag[client][0]     = '\0';
 }
@@ -315,22 +324,45 @@ void DB_Connect()
     }
     else
     {
-        char error[255];
-        g_hDatabase = SQLite_UseDatabase("tf2_leveling", error, sizeof(error));
-        if (g_hDatabase == null)
-            SetFailState("Database connection failed: %s", error);
-        else
-            DB_Init();
+        DB_ConnectSQLite();
     }
 }
 
 public void DB_OnConnect(Database db, const char[] error, any data)
 {
     if (db == null)
-        SetFailState("Database connection failed: %s", error);
+    {
+        // MySQL/configured DB failed — fall back to SQLite instead of crashing
+        LogError("[Leveling] Database connection failed: %s", error);
+        LogError("[Leveling] Falling back to local SQLite database.");
+        DB_ConnectSQLite();
+        return;
+    }
 
     g_hDatabase = db;
+    LogMessage("[Leveling] Connected to database successfully.");
     DB_Init();
+}
+
+void DB_ConnectSQLite()
+{
+    char error[255];
+    g_hDatabase = SQLite_UseDatabase("tf2_leveling", error, sizeof(error));
+    if (g_hDatabase == null)
+        SetFailState("[Leveling] SQLite fallback also failed: %s", error);
+    else
+    {
+        LogMessage("[Leveling] Using local SQLite database (tf2_leveling).");
+        DB_Init();
+
+        // If we got here via MySQL fallback, players may have connected
+        // while g_hDatabase was null. Retry loading any unloaded players.
+        for (int i = 1; i <= MaxClients; i++)
+        {
+            if (IsClientInGame(i) && !IsFakeClient(i) && !g_bDataLoaded[i])
+                DB_LoadUser(i);
+        }
+    }
 }
 
 void DB_Init()
@@ -348,6 +380,9 @@ void DB_Init()
     ... "equipped_aura VARCHAR(64) DEFAULT '', "
     ... "equipped_model VARCHAR(64) DEFAULT '', "
     ... "equipped_tag VARCHAR(16) DEFAULT '', "
+    ... "equipped_eye VARCHAR(64) DEFAULT '', "
+    ... "equipped_death VARCHAR(64) DEFAULT '', "
+    ... "equipped_pet VARCHAR(128) DEFAULT '', "
     ... "custom_welcome VARCHAR(128) DEFAULT '', "
     ... "custom_tag VARCHAR(32) DEFAULT '', "
     ... "playtime INT DEFAULT 0, "
@@ -379,6 +414,23 @@ void DB_Init()
             TABLE_NAME);
     }
     g_hDatabase.Query(DB_OnGenericQuery, query, _, DBPrio_Low);
+
+    // Schema migration: v2 -> v3 (add eye, death, pet columns)
+    // These run on every startup. If columns already exist, the ALTER TABLE
+    // will produce a duplicate column error — this is non-fatal on both MySQL
+    // and SQLite, and DB_OnGenericQuery logs it without crashing.
+    char migrate[256];
+    g_hDatabase.Format(migrate, sizeof(migrate),
+        "ALTER TABLE %s ADD COLUMN equipped_eye VARCHAR(64) DEFAULT ''", TABLE_NAME);
+    g_hDatabase.Query(DB_OnGenericQuery, migrate, _, DBPrio_Low);
+
+    g_hDatabase.Format(migrate, sizeof(migrate),
+        "ALTER TABLE %s ADD COLUMN equipped_death VARCHAR(64) DEFAULT ''", TABLE_NAME);
+    g_hDatabase.Query(DB_OnGenericQuery, migrate, _, DBPrio_Low);
+
+    g_hDatabase.Format(migrate, sizeof(migrate),
+        "ALTER TABLE %s ADD COLUMN equipped_pet VARCHAR(128) DEFAULT ''", TABLE_NAME);
+    g_hDatabase.Query(DB_OnGenericQuery, migrate, _, DBPrio_Low);
 }
 
 void DB_LoadUser(int client)
@@ -394,7 +446,8 @@ void DB_LoadUser(int client)
     char query[512];
     g_hDatabase.Format(query, sizeof(query),
         "SELECT level, xp, total_kills, equipped_trail, equipped_aura, "
-    ... "equipped_model, equipped_tag, playtime, custom_welcome, custom_tag "
+    ... "equipped_model, equipped_tag, playtime, custom_welcome, custom_tag, "
+    ... "equipped_eye, equipped_death, equipped_pet "
     ... "FROM %s WHERE steam_id = '%s'",
         TABLE_NAME, escapedAuth);
 
@@ -424,6 +477,9 @@ public void DB_OnUserLoaded(Database db, DBResultSet results, const char[] error
         g_iPlaytime[client]   = results.FetchInt(7);
         results.FetchString(8, g_sCustomWelcome[client], sizeof(g_sCustomWelcome[]));
         results.FetchString(9, g_sCustomTag[client],     sizeof(g_sCustomTag[]));
+        results.FetchString(10, g_sEye[client],   sizeof(g_sEye[]));
+        results.FetchString(11, g_sDeath[client],  sizeof(g_sDeath[]));
+        results.FetchString(12, g_sPet[client],    sizeof(g_sPet[]));
     }
     else
     {
@@ -471,12 +527,16 @@ void DB_SaveUser(int client)
 
     // Escape all user-controlled strings
     char ea[65], sn[129], st[129], sa[129], sm[129], stag[33], sw[257], sct[65];
+    char se[129], sd[129], sp[257];
     g_hDatabase.Escape(auth, ea, sizeof(ea));
     g_hDatabase.Escape(name, sn, sizeof(sn));
     g_hDatabase.Escape(g_sTrail[client], st, sizeof(st));
     g_hDatabase.Escape(g_sAura[client],  sa, sizeof(sa));
     g_hDatabase.Escape(g_sModel[client], sm, sizeof(sm));
     g_hDatabase.Escape(g_sTag[client],   stag, sizeof(stag));
+    g_hDatabase.Escape(g_sEye[client],   se, sizeof(se));
+    g_hDatabase.Escape(g_sDeath[client], sd, sizeof(sd));
+    g_hDatabase.Escape(g_sPet[client],   sp, sizeof(sp));
     g_hDatabase.Escape(g_sCustomWelcome[client], sw, sizeof(sw));
     g_hDatabase.Escape(g_sCustomTag[client],     sct, sizeof(sct));
 
@@ -484,11 +544,12 @@ void DB_SaveUser(int client)
     g_hDatabase.Format(query, sizeof(query),
         "UPDATE %s SET name='%s', level=%d, xp=%d, total_kills=%d, "
     ... "equipped_trail='%s', equipped_aura='%s', equipped_model='%s', equipped_tag='%s', "
+    ... "equipped_eye='%s', equipped_death='%s', equipped_pet='%s', "
     ... "custom_welcome='%s', custom_tag='%s', "
     ... "playtime=%d, last_seen=CURRENT_TIMESTAMP "
     ... "WHERE steam_id='%s'",
         TABLE_NAME, sn, g_iLevel[client], g_iXP[client], g_iTotalKills[client],
-        st, sa, sm, stag, sw, sct,
+        st, sa, sm, stag, se, sd, sp, sw, sct,
         GetCurrentPlaytime(client), ea);
 
     g_hDatabase.Query(DB_OnGenericQuery, query);
@@ -524,12 +585,16 @@ public Action Timer_AutoSave(Handle timer)
         GetClientName(client, name, sizeof(name));
 
         char ea[65], sn[129], st[129], sa[129], sm[129], stag[33], sw[257], sct[65];
+        char se[129], sd[129], sp[257];
         g_hDatabase.Escape(auth, ea, sizeof(ea));
         g_hDatabase.Escape(name, sn, sizeof(sn));
         g_hDatabase.Escape(g_sTrail[client], st, sizeof(st));
         g_hDatabase.Escape(g_sAura[client],  sa, sizeof(sa));
         g_hDatabase.Escape(g_sModel[client], sm, sizeof(sm));
         g_hDatabase.Escape(g_sTag[client],   stag, sizeof(stag));
+        g_hDatabase.Escape(g_sEye[client],   se, sizeof(se));
+        g_hDatabase.Escape(g_sDeath[client], sd, sizeof(sd));
+        g_hDatabase.Escape(g_sPet[client],   sp, sizeof(sp));
         g_hDatabase.Escape(g_sCustomWelcome[client], sw, sizeof(sw));
         g_hDatabase.Escape(g_sCustomTag[client],     sct, sizeof(sct));
 
@@ -537,11 +602,12 @@ public Action Timer_AutoSave(Handle timer)
         g_hDatabase.Format(query, sizeof(query),
             "UPDATE %s SET name='%s', level=%d, xp=%d, total_kills=%d, "
         ... "equipped_trail='%s', equipped_aura='%s', equipped_model='%s', equipped_tag='%s', "
+        ... "equipped_eye='%s', equipped_death='%s', equipped_pet='%s', "
         ... "custom_welcome='%s', custom_tag='%s', "
         ... "playtime=%d, last_seen=CURRENT_TIMESTAMP "
         ... "WHERE steam_id='%s'",
             TABLE_NAME, sn, g_iLevel[client], g_iXP[client], g_iTotalKills[client],
-            st, sa, sm, stag, sw, sct,
+            st, sa, sm, stag, se, sd, sp, sw, sct,
             GetCurrentPlaytime(client), ea);
 
         txn.AddQuery(query);
@@ -578,6 +644,10 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
 
     if (attacker < 1 || attacker > MaxClients || attacker == victim) return Plugin_Continue;
     if (IsFakeClient(attacker) || !g_bDataLoaded[attacker]) return Plugin_Continue;
+
+    // Spy Dead Ringer feign death — don't award XP/kills for fake deaths
+    if (event.GetInt("death_flags") & TF_DEATHFLAG_DEADRINGER)
+        return Plugin_Continue;
 
     g_iTotalKills[attacker]++;
 
@@ -855,6 +925,9 @@ public int Native_GetEquipped(Handle plugin, int numParams)
         case Cosmetic_Aura:  SetNativeString(3, g_sAura[client], maxlen);
         case Cosmetic_Model: SetNativeString(3, g_sModel[client], maxlen);
         case Cosmetic_Tag:   SetNativeString(3, g_sTag[client], maxlen);
+        case Cosmetic_Eye:   SetNativeString(3, g_sEye[client], maxlen);
+        case Cosmetic_Death: SetNativeString(3, g_sDeath[client], maxlen);
+        case Cosmetic_Pet:   SetNativeString(3, g_sPet[client], maxlen);
         default: ThrowNativeError(SP_ERROR_NATIVE, "Invalid CosmeticType %d", type);
     }
 
@@ -877,6 +950,9 @@ public int Native_SetEquipped(Handle plugin, int numParams)
         case Cosmetic_Aura:  strcopy(g_sAura[client], sizeof(g_sAura[]), value);
         case Cosmetic_Model: strcopy(g_sModel[client], sizeof(g_sModel[]), value);
         case Cosmetic_Tag:   strcopy(g_sTag[client], sizeof(g_sTag[]), value);
+        case Cosmetic_Eye:   strcopy(g_sEye[client], sizeof(g_sEye[]), value);
+        case Cosmetic_Death: strcopy(g_sDeath[client], sizeof(g_sDeath[]), value);
+        case Cosmetic_Pet:   strcopy(g_sPet[client], sizeof(g_sPet[]), value);
         default: ThrowNativeError(SP_ERROR_NATIVE, "Invalid CosmeticType %d", type);
     }
 

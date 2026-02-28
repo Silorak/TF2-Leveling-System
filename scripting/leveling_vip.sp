@@ -6,7 +6,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] VIP"
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.2.0"
 
 #define VIP_WELCOME_MAX 128
 #define VIP_TAG_MAX     32

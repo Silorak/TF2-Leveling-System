@@ -7,7 +7,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Chat Tags"
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.2.0"
 
 #if !defined MAXLENGTH_NAME
 #define MAXLENGTH_NAME 128
@@ -71,11 +71,12 @@ public void OnClientDisconnect(int client)
 public Action CP_OnChatMessage(int& author, ArrayList recipients, char[] flagstring, char[] name, char[] message, bool& processcolors, bool& removecolors)
 {
     if (author <= 0 || !IsClientInGame(author)) return Plugin_Continue;
-    if (!Leveling_IsDataLoaded(author)) return Plugin_Continue;
 
     // Always rebuild — it's cheap (a few string checks + small array scan)
     // and guarantees VIP tag changes, !tags equips, and level-ups are
     // immediately reflected without needing extra forwards.
+    // If data hasn't loaded yet, player defaults to level 1 which still
+    // gets the fallback "[Lvl 1]" tag — no reason to block tags entirely.
     RebuildCachedTag(author);
 
     // Empty = no tags config loaded
@@ -323,7 +324,8 @@ public int SortTagsByLevel(int index1, int index2, Handle array, Handle hndl)
 // HELPERS
 // ============================================================================
 
-// Strip {#RRGGBB} color tags for clean menu display text
+// Strip color tags for clean menu display text
+// Handles both {#RRGGBB} hex format and named tags like {default}, {red}, {teamcolor}
 void StripColorTags(const char[] input, char[] output, int maxlen)
 {
     int outIdx = 0;
@@ -331,10 +333,25 @@ void StripColorTags(const char[] input, char[] output, int maxlen)
 
     for (int i = 0; i < inputLen && outIdx < maxlen - 1; i++)
     {
-        if (input[i] == '{' && i + 8 < inputLen && input[i+1] == '#' && input[i+8] == '}')
+        if (input[i] == '{')
         {
-            i += 8;
-            continue;
+            // Find closing brace
+            int closePos = -1;
+            for (int j = i + 1; j < inputLen && j < i + 20; j++)
+            {
+                if (input[j] == '}')
+                {
+                    closePos = j;
+                    break;
+                }
+            }
+
+            if (closePos != -1)
+            {
+                // Skip everything between { and } inclusive
+                i = closePos;
+                continue;
+            }
         }
         output[outIdx++] = input[i];
     }

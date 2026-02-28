@@ -2,7 +2,7 @@
 
 # TF2 Leveling System
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
 [![SourceMod](https://img.shields.io/badge/SourceMod-1.12-orange?style=for-the-badge)](https://www.sourcemod.net/)
 [![License](https://img.shields.io/badge/license-GPL%20v3-green?style=for-the-badge)](LICENSE)
 
@@ -22,7 +22,7 @@ A modular plugin suite built around a shared native API. Each plugin can be load
 |--------|------|---------|
 | **Core** | `leveling_core.smx` | Database, XP/level logic, admin commands, all natives |
 | **Chat** | `leveling_chat.smx` | Chat tags with hex color support via Chat Processor |
-| **Cosmetics** | `leveling_cosmetics.smx` | Trails, auras, player models, equip menu |
+| **Cosmetics** | `leveling_cosmetics.smx` | Trails, auras, player models, eye effects, death effects, pets |
 | **VIP** | `leveling_vip.smx` | Custom welcome messages and chat tags |
 | **Visuals** | `leveling_visuals.smx` | HUD progress bar (below speed HUD, toggleable with `!xphud`), floating XP, level-up effects |
 
@@ -36,7 +36,7 @@ A modular plugin suite built around a shared native API. Each plugin can be load
 
 **Chat Tags** — Level-based colored chat tags using `{#RRGGBB}` hex format. Players automatically get their highest unlocked tag, or can manually select any unlocked tag via `!tags`. VIPs can override with fully custom tags via `!customtag`. Colors are processed natively by Chat Processor.
 
-**Cosmetics** — Equip trails (sprite-based), auras (particle effects), and player models simultaneously. Trails support per-item color, width, and lifetime configuration. Models use TF2's `SetCustomModel` + `m_bUseClassAnimations` pipeline for correct animations with automatic wearable hiding. All cosmetics are config-driven.
+**Cosmetics** — Equip trails (sprite-based), auras (particle effects), player models, eye effects (killstreak-style particles on eyeglow attachment points — no TF2Attributes dependency), death effects (gold/ice/ash/electro ragdoll flags or custom particles at death position), and pets (parented prop_dynamic at 50% scale). Models use TF2's `SetCustomModel` + `m_bUseClassAnimations` pipeline for correct animations with automatic wearable hiding. All cosmetics are config-driven with optional admin flag restrictions.
 
 **VIP** — Custom welcome messages with `{RAINBOW}` support and custom chat tags. Requires `ADMFLAG_RESERVATION`. Cooldown-protected, input-validated, persisted to database.
 
@@ -240,7 +240,10 @@ enum CosmeticType
     Cosmetic_Trail = 0,
     Cosmetic_Aura,
     Cosmetic_Model,
-    Cosmetic_Tag
+    Cosmetic_Tag,
+    Cosmetic_Eye,
+    Cosmetic_Death,
+    Cosmetic_Pet
 }
 ```
 
@@ -340,42 +343,11 @@ To add a language, edit `translations/leveling.phrases.txt` and add your languag
 
 **Cosmetics not working** — Check that model/material paths exist on the server. Look for `"Model not precached"` errors in the server console. Auras and models only apply to alive players.
 
-**Chat tags not showing** — Make sure `chat-processor.smx` is loaded and `leveling_chat.smx` is loaded after `leveling_core.smx`. Check that `tags.cfg` exists and is valid KeyValues.
+**Chat tags not showing** — Tags work immediately on join (players get a `[Lvl 1]` fallback tag even before database loads). Make sure `chat-processor.smx` is loaded and `leveling_chat.smx` is loaded after `leveling_core.smx`. Check that `tags.cfg` exists and is valid KeyValues. If tags show literal `{default}` text in the menu, update to the latest `leveling_chat.smx` — older versions only stripped `{#RRGGBB}` color codes.
 
-**Database errors** — If MySQL fails, the plugin falls back to SQLite automatically. Check `logs/` for connection errors. Verify your `databases.cfg` entry uses the key name `"leveling"`.
+**Database errors** — If MySQL fails (wrong socket, bad credentials, server down), the plugin automatically falls back to SQLite. You will see `[Leveling] Falling back to local SQLite database.` in logs — this is normal and the plugin keeps working. If you see errors from `admin-sql-threaded.smx` about MySQL sockets, that's SourceMod's built-in admin plugin, not the leveling system — check your `databases.cfg` `"default"` section. No database setup is required to use this plugin — it works out of the box with SQLite.
 
 **Players T-posing with models** — Make sure you are running `leveling_cosmetics.smx`. It uses the correct `SetCustomModel` + `m_bUseClassAnimations` pipeline.
-
----
-
-## Changelog
-
-### v1.1.0
-- **Chat:** Added `!tags` / `!tag` command — select any unlocked chat tag from a menu
-- **Chat:** Tags now update instantly when changed (VIP custom tag, equip, level-up)
-- **Chat:** Fixed color processing — `{#RRGGBB}` tags handled by Chat Processor natively
-- **Chat:** Tag priority: VIP custom tag > manually equipped tag > highest unlocked > fallback
-- **Chat:** Admin flag support in `tags.cfg` — restrict tags to VIPs or specific admin groups
-- **Cosmetics:** Admin flag support in `cosmetics.cfg` — VIP-only trails, auras, models
-- **Cosmetics:** Configurable trail properties (color, width, lifetime) per trail
-- **Cosmetics:** Automatic wearable hiding when using custom player models
-- **Cosmetics:** Entity reference safety for trails and auras
-- **Cosmetics:** Fixed KV traversal mismatch in config parsing
-- **VIP:** Welcome message now delayed 5 seconds so players see it after loading in
-- **VIP:** Welcome message now shows player name (`PlayerName: message`)
-- **VIP:** Fixed rainbow colors — `{RAINBOW}` now produces correct `{#RRGGBB}` format
-- **Core:** Fixed MySQL compatibility — `CREATE INDEX IF NOT EXISTS` not supported by MySQL
-- **Core:** Consistent version strings across all plugins
-
-### v1.0.0
-- Initial release — modular subplugin architecture
-- Core with XP/level system, MySQL + SQLite, transaction-batched auto-save
-- Chat tags with hex colors and caching
-- Cosmetics (trails, auras, models) with correct TF2 `SetCustomModel` pipeline
-- VIP custom welcome messages and tags
-- HUD progress bar, floating XP, level-up effects
-- 17 natives, 3 forwards, `CosmeticType` enum, `LevelingPlayer` methodmap
-- 6 language translations (EN, ES, RU, DE, FR, PT)
 
 ---
 

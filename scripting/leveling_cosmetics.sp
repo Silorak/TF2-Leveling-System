@@ -9,13 +9,13 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Cosmetics"
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.2.0"
 
 public Plugin myinfo =
 {
     name        = PLUGIN_NAME,
     author      = "Silorak",
-    description = "Trails, auras, models, and equip menu",
+    description = "Trails, auras, models, eyes, death effects, and pets",
     version     = PLUGIN_VERSION,
     url         = "https://github.com/Silorak/TF2-Leveling-System"
 };
@@ -37,9 +37,15 @@ enum struct CosmeticItem
 ArrayList g_TrailList;
 ArrayList g_AuraList;
 ArrayList g_ModelList;
+ArrayList g_EyeList;
+ArrayList g_DeathList;
+ArrayList g_PetList;
 
 int  g_iTrailEntity[MAXPLAYERS + 1] = { INVALID_ENT_REFERENCE, ... };
 int  g_iAuraEntity[MAXPLAYERS + 1]  = { INVALID_ENT_REFERENCE, ... };
+int  g_iEyeEntityL[MAXPLAYERS + 1]  = { INVALID_ENT_REFERENCE, ... };
+int  g_iEyeEntityR[MAXPLAYERS + 1]  = { INVALID_ENT_REFERENCE, ... };
+int  g_iPetEntity[MAXPLAYERS + 1]   = { INVALID_ENT_REFERENCE, ... };
 bool g_bHasCustomModel[MAXPLAYERS + 1];
 
 public void OnPluginStart()
@@ -47,6 +53,9 @@ public void OnPluginStart()
     g_TrailList = new ArrayList(sizeof(CosmeticItem));
     g_AuraList  = new ArrayList(sizeof(CosmeticItem));
     g_ModelList = new ArrayList(sizeof(CosmeticItem));
+    g_EyeList   = new ArrayList(sizeof(CosmeticItem));
+    g_DeathList = new ArrayList(sizeof(CosmeticItem));
+    g_PetList   = new ArrayList(sizeof(CosmeticItem));
 
     LoadTranslations("leveling.phrases");
 
@@ -54,6 +63,7 @@ public void OnPluginStart()
     RegConsoleCmd("sm_equip",     Command_Cosmetics, "Open cosmetics menu");
 
     HookEvent("player_spawn", Event_PlayerSpawn);
+    HookEvent("player_death", Event_PlayerDeath);
 }
 
 public void OnMapStart()
@@ -66,6 +76,15 @@ public void OnClientDisconnect(int client)
 {
     RemoveAllCosmetics(client);
     g_bHasCustomModel[client] = false;
+}
+
+void RemoveAllCosmetics(int client)
+{
+    RemoveTrail(client);
+    RemoveAura(client);
+    RemoveEyeEffects(client);
+    RemovePet(client);
+    RestoreModel(client);
 }
 
 public void Leveling_OnDataLoaded(int client)
@@ -126,17 +145,22 @@ void ApplyCosmetics(int client)
     if (buffer[0] != '\0')
         SetPlayerModel(client, buffer);
 
+    // Eye Effects
+    Leveling_GetEquipped(client, Cosmetic_Eye, buffer, sizeof(buffer));
+    if (buffer[0] != '\0')
+        CreateEyeEffects(client, buffer);
+
+    // Pet
+    Leveling_GetEquipped(client, Cosmetic_Pet, buffer, sizeof(buffer));
+    if (buffer[0] != '\0')
+        CreatePet(client, buffer);
+
     // Spawn particle for level 3+
     if (Leveling_GetLevel(client) >= 3)
         CreateSpawnParticle(client);
 }
 
-void RemoveAllCosmetics(int client)
-{
-    RemoveTrail(client);
-    RemoveAura(client);
-    RestoreModel(client);
-}
+// (RemoveAllCosmetics is defined above near OnClientDisconnect)
 
 // ============================================================================
 // TRAIL
@@ -312,6 +336,186 @@ public Action Timer_KillEntity(Handle timer, int ref)
 }
 
 // ============================================================================
+// EYE EFFECTS (killstreak-style particles on eyeglow attachment points)
+// ============================================================================
+
+void CreateEyeEffects(int client, const char[] particleName)
+{
+    RemoveEyeEffects(client);
+
+    int particleL = AttachParticleToPoint(client, particleName, "eyeglow_L");
+    int particleR = AttachParticleToPoint(client, particleName, "eyeglow_R");
+    g_iEyeEntityL[client] = (particleL != -1) ? EntIndexToEntRef(particleL) : INVALID_ENT_REFERENCE;
+    g_iEyeEntityR[client] = (particleR != -1) ? EntIndexToEntRef(particleR) : INVALID_ENT_REFERENCE;
+}
+
+int AttachParticleToPoint(int client, const char[] particleName, const char[] attachPoint)
+{
+    int particle = CreateEntityByName("info_particle_system");
+    if (particle == -1) return -1;
+
+    DispatchKeyValue(particle, "effect_name", particleName);
+    DispatchSpawn(particle);
+    ActivateEntity(particle);
+
+    SetVariantString("!activator");
+    AcceptEntityInput(particle, "SetParent", client);
+    SetVariantString(attachPoint);
+    AcceptEntityInput(particle, "SetParentAttachment", particle, particle);
+
+    AcceptEntityInput(particle, "Start");
+    return particle;
+}
+
+void RemoveEyeEffects(int client)
+{
+    KillEntRef(g_iEyeEntityL[client]);
+    g_iEyeEntityL[client] = INVALID_ENT_REFERENCE;
+    KillEntRef(g_iEyeEntityR[client]);
+    g_iEyeEntityR[client] = INVALID_ENT_REFERENCE;
+}
+
+// ============================================================================
+// DEATH EFFECTS (ragdoll flags or particles on death)
+// ============================================================================
+
+public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadcast)
+{
+    int victim = GetClientOfUserId(event.GetInt("userid"));
+    if (victim < 1 || !Leveling_IsDataLoaded(victim)) return Plugin_Continue;
+
+    // Spy Dead Ringer feign death — don't apply death effects or remove cosmetics
+    if (event.GetInt("death_flags") & 32) // TF_DEATHFLAG_DEADRINGER
+        return Plugin_Continue;
+
+    // Clean up eye effects and pet on real death (they linger on the invisible body otherwise)
+    RemoveEyeEffects(victim);
+    RemovePet(victim);
+
+    char deathEffect[64];
+    Leveling_GetEquipped(victim, Cosmetic_Death, deathEffect, sizeof(deathEffect));
+    if (deathEffect[0] == '\0') return Plugin_Continue;
+
+    // Check if it's a ragdoll flag or a particle name
+    if (StrEqual(deathEffect, "gold", false))
+        ApplyRagdollFlag(victim, "m_bGoldRagdoll");
+    else if (StrEqual(deathEffect, "ice", false))
+        ApplyRagdollFlag(victim, "m_bIceRagdoll");
+    else if (StrEqual(deathEffect, "ash", false))
+        ApplyRagdollFlag(victim, "m_bBecomeAsh");
+    else if (StrEqual(deathEffect, "electro", false))
+        ApplyRagdollFlag(victim, "m_bElectrocuted");
+    else
+    {
+        // It's a custom particle name — spawn at death position
+        float pos[3];
+        GetClientAbsOrigin(victim, pos);
+        SpawnTempParticle(pos, deathEffect, 3.0);
+    }
+
+    return Plugin_Continue;
+}
+
+void ApplyRagdollFlag(int client, const char[] prop)
+{
+    // Delay one frame so TF2 has time to create the ragdoll entity
+    DataPack dp = new DataPack();
+    dp.WriteCell(GetClientUserId(client));
+    dp.WriteString(prop);
+    RequestFrame(Frame_ApplyRagdollFlag, dp);
+}
+
+void Frame_ApplyRagdollFlag(DataPack dp)
+{
+    dp.Reset();
+    int client = GetClientOfUserId(dp.ReadCell());
+    char prop[32];
+    dp.ReadString(prop, sizeof(prop));
+    delete dp;
+
+    if (client == 0 || !IsClientInGame(client)) return;
+
+    int ragdoll = GetEntPropEnt(client, Prop_Send, "m_hRagdoll");
+    if (ragdoll > 0 && IsValidEntity(ragdoll))
+        SetEntProp(ragdoll, Prop_Send, prop, 1);
+}
+
+void SpawnTempParticle(float pos[3], const char[] particleName, float duration)
+{
+    int particle = CreateEntityByName("info_particle_system");
+    if (particle == -1) return;
+
+    DispatchKeyValue(particle, "effect_name", particleName);
+    DispatchSpawn(particle);
+    TeleportEntity(particle, pos, NULL_VECTOR, NULL_VECTOR);
+    ActivateEntity(particle);
+    AcceptEntityInput(particle, "Start");
+
+    CreateTimer(duration, Timer_KillEntity, EntIndexToEntRef(particle), TIMER_FLAG_NO_MAPCHANGE);
+}
+
+// ============================================================================
+// PET (parented prop_dynamic follower)
+// ============================================================================
+
+void CreatePet(int client, const char[] modelPath)
+{
+    RemovePet(client);
+
+    if (!IsModelPrecached(modelPath))
+    {
+        LogError("[Leveling] Pet model not precached: %s", modelPath);
+        return;
+    }
+
+    int pet = CreateEntityByName("prop_dynamic_override");
+    if (pet == -1) return;
+
+    DispatchKeyValue(pet, "model", modelPath);
+    DispatchKeyValue(pet, "solid", "0");           // No collision
+    DispatchSpawn(pet);
+
+    // Try to play idle animation — silently fails on models without it
+    SetVariantString("idle");
+    AcceptEntityInput(pet, "SetAnimation");
+
+    // Position above and behind the player's head
+    float pos[3];
+    GetClientAbsOrigin(client, pos);
+    pos[2] += 80.0;
+
+    TeleportEntity(pet, pos, NULL_VECTOR, NULL_VECTOR);
+
+    SetVariantString("!activator");
+    AcceptEntityInput(pet, "SetParent", client);
+
+    // Scale down to 50% for a "mini" companion look
+    SetEntPropFloat(pet, Prop_Send, "m_flModelScale", 0.5);
+
+    g_iPetEntity[client] = EntIndexToEntRef(pet);
+}
+
+void RemovePet(int client)
+{
+    KillEntRef(g_iPetEntity[client]);
+    g_iPetEntity[client] = INVALID_ENT_REFERENCE;
+}
+
+// ============================================================================
+// SHARED ENTITY HELPER
+// ============================================================================
+
+void KillEntRef(int ref)
+{
+    if (ref != INVALID_ENT_REFERENCE)
+    {
+        int entity = EntRefToEntIndex(ref);
+        if (entity != INVALID_ENT_REFERENCE)
+            AcceptEntityInput(entity, "Kill");
+    }
+}
+
+// ============================================================================
 // MENUS
 // ============================================================================
 
@@ -339,6 +543,12 @@ void OpenEquipMenu(int client)
     menu.AddItem(info, "Auras");
     IntToString(view_as<int>(Cosmetic_Model), info, sizeof(info));
     menu.AddItem(info, "Models");
+    IntToString(view_as<int>(Cosmetic_Eye), info, sizeof(info));
+    menu.AddItem(info, "Eye Effects");
+    IntToString(view_as<int>(Cosmetic_Death), info, sizeof(info));
+    menu.AddItem(info, "Death Effects");
+    IntToString(view_as<int>(Cosmetic_Pet), info, sizeof(info));
+    menu.AddItem(info, "Pets");
     menu.AddItem("unequip", "Unequip All");
     menu.Display(client, MENU_TIME_FOREVER);
 }
@@ -355,6 +565,9 @@ public int Handler_EquipMenu(Menu menu, MenuAction action, int param1, int param
             Leveling_SetEquipped(param1, Cosmetic_Trail, "");
             Leveling_SetEquipped(param1, Cosmetic_Aura, "");
             Leveling_SetEquipped(param1, Cosmetic_Model, "");
+            Leveling_SetEquipped(param1, Cosmetic_Eye, "");
+            Leveling_SetEquipped(param1, Cosmetic_Death, "");
+            Leveling_SetEquipped(param1, Cosmetic_Pet, "");
             RemoveAllCosmetics(param1);
             CPrintToChat(param1, "%t", "Cosmetics_UnequipAll");
             OpenEquipMenu(param1);
@@ -379,6 +592,9 @@ void OpenCosmeticList(int client, CosmeticType type)
         case Cosmetic_Trail: strcopy(title, sizeof(title), "Trails");
         case Cosmetic_Aura:  strcopy(title, sizeof(title), "Auras");
         case Cosmetic_Model: strcopy(title, sizeof(title), "Models");
+        case Cosmetic_Eye:   strcopy(title, sizeof(title), "Eye Effects");
+        case Cosmetic_Death: strcopy(title, sizeof(title), "Death Effects");
+        case Cosmetic_Pet:   strcopy(title, sizeof(title), "Pets");
     }
 
     Menu menu = new Menu(Handler_CosmeticList);
@@ -390,6 +606,9 @@ void OpenCosmeticList(int client, CosmeticType type)
         case Cosmetic_Trail: list = g_TrailList;
         case Cosmetic_Aura:  list = g_AuraList;
         case Cosmetic_Model: list = g_ModelList;
+        case Cosmetic_Eye:   list = g_EyeList;
+        case Cosmetic_Death: list = g_DeathList;
+        case Cosmetic_Pet:   list = g_PetList;
     }
 
     if (list != null)
@@ -469,6 +688,22 @@ public int Handler_CosmeticList(Menu menu, MenuAction action, int param1, int pa
                 SetPlayerModel(param1, value);
                 CPrintToChat(param1, "%t", "Model_Equipped", display);
             }
+            case Cosmetic_Eye:
+            {
+                RemoveEyeEffects(param1);
+                CreateEyeEffects(param1, value);
+                CPrintToChat(param1, "%t", "Eye_Equipped", display);
+            }
+            case Cosmetic_Death:
+            {
+                CPrintToChat(param1, "%t", "Death_Equipped", display);
+            }
+            case Cosmetic_Pet:
+            {
+                RemovePet(param1);
+                CreatePet(param1, value);
+                CPrintToChat(param1, "%t", "Pet_Equipped", display);
+            }
         }
 
         OpenEquipMenu(param1);
@@ -490,6 +725,9 @@ void LoadCosmetics()
     g_TrailList.Clear();
     g_AuraList.Clear();
     g_ModelList.Clear();
+    g_EyeList.Clear();
+    g_DeathList.Clear();
+    g_PetList.Clear();
 
     char path[PLATFORM_MAX_PATH];
     BuildPath(Path_SM, path, sizeof(path), "configs/leveling/cosmetics.cfg");
@@ -506,6 +744,9 @@ void LoadCosmetics()
     ParseSection(kv, "Trails", g_TrailList, "material");
     ParseSection(kv, "Auras",  g_AuraList,  "effect");
     ParseSection(kv, "Models", g_ModelList,  "model");
+    ParseSection(kv, "Eyes",   g_EyeList,   "particle");
+    ParseSection(kv, "Deaths", g_DeathList,  "effect");
+    ParseSection(kv, "Pets",   g_PetList,    "model");
 
     delete kv;
 }
@@ -560,6 +801,13 @@ void PrecacheCosmetics()
         g_ModelList.GetArray(i, item);
         if (item.value[0] != '\0') PrecacheModel(item.value, true);
     }
+
+    for (int i = 0; i < g_PetList.Length; i++)
+    {
+        CosmeticItem item;
+        g_PetList.GetArray(i, item);
+        if (item.value[0] != '\0') PrecacheModel(item.value, true);
+    }
 }
 
 public void OnPluginEnd()
@@ -573,4 +821,7 @@ public void OnPluginEnd()
     delete g_TrailList;
     delete g_AuraList;
     delete g_ModelList;
+    delete g_EyeList;
+    delete g_DeathList;
+    delete g_PetList;
 }
