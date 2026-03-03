@@ -16,7 +16,7 @@
 #define PLUGIN_NAME        "TF2 Leveling System"
 #define PLUGIN_AUTHOR      "Silorak"
 #define PLUGIN_DESCRIPTION "Core leveling system with XP, levels, and database"
-#define PLUGIN_VERSION "1.3.0"
+#define PLUGIN_VERSION "1.3.1"
 #define PLUGIN_URL         "https://github.com/Silorak/TF2-Leveling-System"
 
 #define MAX_LEVEL          50

@@ -2,7 +2,7 @@
 
 # TF2 Leveling System
 
-[![Version](https://img.shields.io/badge/version-1.3.0-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
+[![Version](https://img.shields.io/badge/version-1.3.1-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
 [![SourceMod](https://img.shields.io/badge/SourceMod-1.12-orange?style=for-the-badge)](https://www.sourcemod.net/)
 [![License](https://img.shields.io/badge/license-GPL%20v3-green?style=for-the-badge)](LICENSE)
 
@@ -34,7 +34,7 @@ A modular plugin suite built around a shared native API. Each plugin can be load
 
 **Leveling** — 50 levels with configurable exponential XP scaling. XP from kills, revenge bonuses, and a configurable donor multiplier. Auto-save with transaction batching. MySQL and SQLite both supported.
 
-**Chat Tags** — Level-based colored chat tags using `{#RRGGBB}` hex format. Colors are converted to raw `\x07RRGGBB` bytes at runtime (same approach as shavit's bhoptimer), bypassing Chat Processor's color-stripping middleware for maximum reliability. Players automatically get their highest unlocked tag, or can manually select any unlocked tag via `!tags`. VIPs can override with fully custom tags via `!customtag`.
+**Chat Tags** — Level-based colored chat tags using `{#RRGGBB}` hex format with multi-color support (e.g. `{#FF0000}[{#00FF00}Tag{#FF0000}]`). Uses Chat Processor's native tag API (`ChatProcessor_AddClientTag`) for reliable rendering — no forward ordering conflicts. Optional per-tag `name_color` for coloring the player's name in chat. Players automatically get their highest unlocked tag, or can manually select any unlocked tag via `!tags`. VIPs can override with fully custom tags via `!customtag`.
 
 **Cosmetics** — Equip trails (sprite-based), auras (taunt unusual particle effects — full-body effects like Holy Grail, Hellish Inferno, Scorching Sensation visible to everyone including the owner), player models, eye effects (killstreak-style particles on eyeglow attachment points — no TF2Attributes dependency), death effects (gold/ice/ash/electro ragdoll flags or custom particles at death position), and pets (parented prop_dynamic at 50% scale). Particle auras use the proven entity creation order (Spawn → Parent → Activate → Start) from AlliedModders community best practices. Models use TF2's `SetCustomModel` + `m_bUseClassAnimations` pipeline for correct animations with automatic wearable hiding. All cosmetics are config-driven with optional admin flag restrictions.
 
@@ -132,13 +132,14 @@ At defaults: Level 1→2 needs 100 XP (10 kills). Level 25→26 needs ~762 XP. L
     "50"    "{#FF00FF}[Legend]"
     "10"
     {
-        "tag"   "{#FFD700}[VIP Gold]"
-        "flag"  "a"
+        "tag"          "{#FFD700}[{#FFFFFF}VIP Gold{#FFD700}]"
+        "name_color"   "{#FFD700}"
+        "flag"         "a"
     }
 }
 ```
 
-Tags support two formats: simple (`"level" "tag"`) for everyone, or subsection with `"flag"` for admin-restricted tags. Players see restricted tags as `(VIP Only)` in the `!tags` menu.
+Tags support two formats: simple (`"level" "tag"`) for everyone, or subsection with optional `"name_color"` and `"flag"` for colored names and admin-restricted tags. Multi-color tags are supported (e.g. `{#FF0000}[{#00FF00}Tag{#FF0000}]`). Players see restricted tags as `(VIP Only)` in the `!tags` menu.
 
 ### Cosmetics — `configs/leveling/cosmetics.cfg`
 
