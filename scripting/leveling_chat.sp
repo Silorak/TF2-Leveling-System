@@ -7,7 +7,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Chat Tags"
-#define PLUGIN_VERSION "1.3.0"
+#define PLUGIN_VERSION "1.3.1"
 
 #if !defined MAXLENGTH_NAME
 #define MAXLENGTH_NAME 128
@@ -26,14 +26,14 @@ enum struct LevelTag
 {
     int level;
     int flag; // Admin flag required (0 = none, available to all)
-    char tag[64];
+    char tag[128];
+    char nameColor[32];
 }
 
 ArrayList g_TagList;
 
-// Cached tag per client — stored in raw {#RRGGBB} format,
-// Chat Processor's CProcessVariables handles the color conversion.
-char g_CachedTag[MAXPLAYERS + 1][128];
+// Track which tag is currently applied per client (for cleanup)
+char g_AppliedTag[MAXPLAYERS + 1][128];
 
 public void OnPluginStart()
 {
@@ -51,56 +51,126 @@ public void OnMapStart()
 
 public void Leveling_OnDataLoaded(int client)
 {
-    RebuildCachedTag(client);
+    ApplyTag(client);
 }
 
 public void Leveling_OnLevelUp(int client, int newLevel)
 {
-    RebuildCachedTag(client);
+    ApplyTag(client);
 }
 
 public void OnClientDisconnect(int client)
 {
-    g_CachedTag[client][0] = '\0';
+    g_AppliedTag[client][0] = '\0';
 }
 
 // ============================================================================
-// CHAT PROCESSOR HOOK
+// TAG APPLICATION — uses Chat Processor's native tag API
 // ============================================================================
 
-public Action CP_OnChatMessage(int& author, ArrayList recipients, char[] flagstring, char[] name, char[] message, bool& processcolors, bool& removecolors)
+void ApplyTag(int client)
 {
-    if (author <= 0 || !IsClientInGame(author)) return Plugin_Continue;
+    if (!IsClientInGame(client)) return;
 
-    RebuildCachedTag(author);
+    // 1. Strip any previously applied tag
+    if (g_AppliedTag[client][0] != '\0')
+    {
+        ChatProcessor_RemoveClientTag(client, g_AppliedTag[client]);
+        g_AppliedTag[client][0] = '\0';
+    }
 
-    if (g_CachedTag[author][0] == '\0')
-        return Plugin_Continue;
+    // 2. Determine which tag to use
+    char tagStr[128];
+    char nameColor[32];
+    ResolveTag(client, tagStr, sizeof(tagStr), nameColor, sizeof(nameColor));
 
-    // Convert {#RRGGBB} to raw \x07RRGGBB byte sequences before injecting
-    // into the name buffer.  This bypasses Chat Processor's
-    // sm_chatprocessor_strip_colors cvar (which strips {color} tags from
-    // non-admins before the forward fires) and avoids relying on
-    // CProcessVariables to convert them later.
-    //
-    // Reference: shavit's bhoptimer (shavit-chat.sp) uses the same raw-byte
-    // approach for maximum reliability across engine versions.
-    // SourceMod wiki confirms TF2 supports \x07 + 6 hex chars for RGB.
-    char convertedTag[128];
-    strcopy(convertedTag, sizeof(convertedTag), g_CachedTag[author]);
-    ConvertHexColors(convertedTag, sizeof(convertedTag));
+    if (tagStr[0] == '\0')
+        return;
 
-    // \x03 = team color.  Prepend tag, then reset to team color for the
-    // player name itself so it renders in the correct team color.
-    char newName[MAXLENGTH_NAME];
-    Format(newName, sizeof(newName), "%s \x03%s", convertedTag, name);
-    strcopy(name, MAXLENGTH_NAME, newName);
+    // 3. Apply via Chat Processor's native API
+    // The tag string contains embedded {#RRGGBB} / {color} tags.
+    // Chat Processor's internal CP_OnChatMessage handler will render them
+    // and CProcessVariables will convert them to raw bytes.
+    // Append a space after the tag so it doesn't run into the name.
+    char fullTag[128];
+    Format(fullTag, sizeof(fullTag), "%s ", tagStr);
 
-    // Colors are already raw bytes — tell Chat Processor NOT to run
-    // CProcessVariables on our output (it would mangle raw \x07 bytes).
-    processcolors = false;
-    removecolors  = false;
-    return Plugin_Changed;
+    ChatProcessor_AddClientTag(client, fullTag);
+    strcopy(g_AppliedTag[client], sizeof(g_AppliedTag[]), fullTag);
+
+    // 4. Set name color if specified
+    if (nameColor[0] != '\0')
+    {
+        ChatProcessor_SetNameColor(client, nameColor);
+    }
+}
+
+// Determine the tag string and name color for a client
+void ResolveTag(int client, char[] tagOut, int tagMaxLen, char[] nameColorOut, int nameColorMaxLen)
+{
+    tagOut[0] = '\0';
+    nameColorOut[0] = '\0';
+
+    if (!IsClientInGame(client)) return;
+
+    // Priority 1: Custom VIP tag (set via !customtag)
+    char customTag[32];
+    Leveling_GetCustomTag(client, customTag, sizeof(customTag));
+    if (customTag[0] != '\0')
+    {
+        strcopy(tagOut, tagMaxLen, customTag);
+        return;
+    }
+
+    // Priority 2: Manually equipped tag (set via !tags menu)
+    char equippedTag[16];
+    Leveling_GetEquipped(client, Cosmetic_Tag, equippedTag, sizeof(equippedTag));
+    if (equippedTag[0] != '\0')
+    {
+        int equippedLevel = StringToInt(equippedTag);
+        int playerLevel = Leveling_GetLevel(client);
+
+        // Validate the tag is still unlocked
+        if (equippedLevel <= playerLevel)
+        {
+            for (int i = 0; i < g_TagList.Length; i++)
+            {
+                LevelTag entry;
+                g_TagList.GetArray(i, entry);
+                if (entry.level == equippedLevel)
+                {
+                    bool hasFlag = (entry.flag == 0 || CheckCommandAccess(client, "sm_tag_flag", entry.flag, true));
+                    if (hasFlag)
+                    {
+                        strcopy(tagOut, tagMaxLen, entry.tag);
+                        strcopy(nameColorOut, nameColorMaxLen, entry.nameColor);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // Priority 3: Highest unlocked tag (auto mode)
+    int playerLevel = Leveling_GetLevel(client);
+    for (int i = g_TagList.Length - 1; i >= 0; i--)
+    {
+        LevelTag entry;
+        g_TagList.GetArray(i, entry);
+        if (entry.level <= playerLevel)
+        {
+            bool hasFlag = (entry.flag == 0 || CheckCommandAccess(client, "sm_tag_flag", entry.flag, true));
+            if (hasFlag)
+            {
+                strcopy(tagOut, tagMaxLen, entry.tag);
+                strcopy(nameColorOut, nameColorMaxLen, entry.nameColor);
+                return;
+            }
+        }
+    }
+
+    // Fallback: generic level tag
+    Format(tagOut, tagMaxLen, "{#00FF00}[Lvl %d]", playerLevel);
 }
 
 // ============================================================================
@@ -164,7 +234,7 @@ public int Handler_TagMenu(Menu menu, MenuAction action, int param1, int param2)
 
         if (StrEqual(info, "auto"))
         {
-            // Clear equipped tag — RebuildCachedTag will use highest unlocked
+            // Clear equipped tag — ApplyTag will use highest unlocked
             Leveling_SetEquipped(param1, Cosmetic_Tag, "");
             CPrintToChat(param1, "{green}[Leveling]{default} Tag set to auto (highest unlocked).");
         }
@@ -188,78 +258,12 @@ public int Handler_TagMenu(Menu menu, MenuAction action, int param1, int param2)
             }
         }
 
-        // Invalidate cache — next chat message will rebuild with new selection
-        g_CachedTag[param1][0] = '\0';
+        // Re-apply the tag via Chat Processor's API
+        ApplyTag(param1);
         Leveling_SavePlayer(param1);
     }
     else if (action == MenuAction_End) delete menu;
     return 0;
-}
-
-// ============================================================================
-// TAG LOGIC
-// ============================================================================
-
-void RebuildCachedTag(int client)
-{
-    if (!IsClientInGame(client)) return;
-
-    // Priority 1: Custom VIP tag (set via !customtag)
-    char customTag[32];
-    Leveling_GetCustomTag(client, customTag, sizeof(customTag));
-    if (customTag[0] != '\0')
-    {
-        strcopy(g_CachedTag[client], sizeof(g_CachedTag[]), customTag);
-        return;
-    }
-
-    // Priority 2: Manually equipped tag (set via !tags menu)
-    char equippedTag[16];
-    Leveling_GetEquipped(client, Cosmetic_Tag, equippedTag, sizeof(equippedTag));
-    if (equippedTag[0] != '\0')
-    {
-        int equippedLevel = StringToInt(equippedTag);
-        int playerLevel = Leveling_GetLevel(client);
-
-        // Validate the tag is still unlocked and player has flag (handles level reset)
-        if (equippedLevel <= playerLevel)
-        {
-            for (int i = 0; i < g_TagList.Length; i++)
-            {
-                LevelTag entry;
-                g_TagList.GetArray(i, entry);
-                if (entry.level == equippedLevel)
-                {
-                    bool hasFlag = (entry.flag == 0 || CheckCommandAccess(client, "sm_tag_flag", entry.flag, true));
-                    if (hasFlag)
-                    {
-                        strcopy(g_CachedTag[client], sizeof(g_CachedTag[]), entry.tag);
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    // Priority 3: Highest unlocked tag (auto mode) — must meet level AND flag
-    int playerLevel = Leveling_GetLevel(client);
-    for (int i = g_TagList.Length - 1; i >= 0; i--)
-    {
-        LevelTag entry;
-        g_TagList.GetArray(i, entry);
-        if (entry.level <= playerLevel)
-        {
-            bool hasFlag = (entry.flag == 0 || CheckCommandAccess(client, "sm_tag_flag", entry.flag, true));
-            if (hasFlag)
-            {
-                strcopy(g_CachedTag[client], sizeof(g_CachedTag[]), entry.tag);
-                return;
-            }
-        }
-    }
-
-    // Fallback: generic level tag
-    Format(g_CachedTag[client], sizeof(g_CachedTag[]), "{#00FF00}[Lvl %d]", playerLevel);
 }
 
 // ============================================================================
@@ -292,18 +296,20 @@ void LoadChatTags()
             entry.level = StringToInt(levelStr);
 
             // Check if this is a subsection (has child keys) or a flat key-value
-            // Subsection format: "1" { "tag" "..." "flag" "a" }
+            // Subsection format: "1" { "tag" "..." "name_color" "..." "flag" "a" }
             // Flat format:       "1" "{#00FF00}[Newbie]"
             if (kv.GetDataType(NULL_STRING) != KvData_None)
             {
                 // Flat format: value is the tag directly
                 kv.GetString(NULL_STRING, entry.tag, sizeof(entry.tag));
                 entry.flag = 0;
+                entry.nameColor[0] = '\0';
             }
             else
             {
-                // Subsection format: read tag and optional flag
+                // Subsection format: read tag, optional name_color, and optional flag
                 kv.GetString("tag", entry.tag, sizeof(entry.tag));
+                kv.GetString("name_color", entry.nameColor, sizeof(entry.nameColor), "");
                 char flagStr[16];
                 kv.GetString("flag", flagStr, sizeof(flagStr), "");
                 entry.flag = (flagStr[0] != '\0') ? ReadFlagString(flagStr) : 0;
@@ -317,6 +323,13 @@ void LoadChatTags()
     delete kv;
 
     SortADTArrayCustom(g_TagList, SortTagsByLevel);
+
+    // Re-apply tags for all connected players after config reload
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsClientInGame(i) && !IsFakeClient(i) && Leveling_IsDataLoaded(i))
+            ApplyTag(i);
+    }
 }
 
 public int SortTagsByLevel(int index1, int index2, Handle array, Handle hndl)
@@ -331,67 +344,6 @@ public int SortTagsByLevel(int index1, int index2, Handle array, Handle hndl)
 // ============================================================================
 // HELPERS
 // ============================================================================
-
-// Convert {#RRGGBB} color tags to raw \x07RRGGBB byte sequences.
-// Also converts {default} to \x01 (white) and {teamcolor} to \x03.
-//
-// TF2 supports \x07 followed by exactly 6 hex characters for arbitrary
-// RGB colors in SayText2 messages (confirmed by AlliedModders wiki and
-// the SourceMod Scripting FAQ).  Using raw bytes means we don't depend
-// on Chat Processor's CProcessVariables running successfully.
-void ConvertHexColors(char[] str, int maxlen)
-{
-    char output[256];
-    int outIdx = 0;
-    int len = strlen(str);
-
-    for (int i = 0; i < len && outIdx < sizeof(output) - 8; i++)
-    {
-        // Check for {default}
-        if (i + 9 <= len && strncmp(str[i], "{default}", 9, false) == 0)
-        {
-            output[outIdx++] = '\x01';
-            i += 8; // skip past {default} (-1 because loop i++)
-            continue;
-        }
-
-        // Check for {teamcolor}
-        if (i + 11 <= len && strncmp(str[i], "{teamcolor}", 11, false) == 0)
-        {
-            output[outIdx++] = '\x03';
-            i += 10;
-            continue;
-        }
-
-        // Check for {#RRGGBB} — 10 chars total
-        if (i + 10 <= len && str[i] == '{' && str[i+1] == '#' && str[i+9] == '}')
-        {
-            bool valid = true;
-            for (int j = 2; j < 8; j++)
-            {
-                char c = str[i+j];
-                if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')))
-                {
-                    valid = false;
-                    break;
-                }
-            }
-
-            if (valid)
-            {
-                output[outIdx++] = '\x07';
-                for (int j = 2; j < 8 && outIdx < sizeof(output) - 1; j++)
-                    output[outIdx++] = str[i+j];
-                i += 9; // skip past {#RRGGBB}
-                continue;
-            }
-        }
-
-        output[outIdx++] = str[i];
-    }
-    output[outIdx] = '\0';
-    strcopy(str, maxlen, output);
-}
 
 // Strip color tags for clean menu display text
 // Handles both {#RRGGBB} hex format and named tags like {default}, {red}, {teamcolor}
@@ -429,5 +381,14 @@ void StripColorTags(const char[] input, char[] output, int maxlen)
 
 public void OnPluginEnd()
 {
+    // Clean up tags for all clients
+    for (int i = 1; i <= MaxClients; i++)
+    {
+        if (IsClientInGame(i) && !IsFakeClient(i) && g_AppliedTag[i][0] != '\0')
+        {
+            ChatProcessor_RemoveClientTag(i, g_AppliedTag[i]);
+        }
+    }
+
     delete g_TagList;
 }
