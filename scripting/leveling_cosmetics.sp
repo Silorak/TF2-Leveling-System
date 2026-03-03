@@ -9,7 +9,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Cosmetics"
-#define PLUGIN_VERSION "1.2.0"
+#define PLUGIN_VERSION "1.3.0"
 
 public Plugin myinfo =
 {
@@ -243,22 +243,44 @@ void CreateAura(int client, const char[] particleName)
     int particle = CreateEntityByName("info_particle_system");
     if (particle == -1) return;
 
+    // Give the player entity a targetname so the particle can reference
+    // it via parentname keyvalue (the reliable entity I/O approach used
+    // by rmf's AttachLoopParticleBone stock and Pelipoika's plugins).
+    char targetName[32];
+    Format(targetName, sizeof(targetName), "lvlplayer%d", GetClientUserId(client));
+    DispatchKeyValue(client, "targetname", targetName);
+
+    // Set particle keyvalues BEFORE spawn — the engine reads these during
+    // DispatchSpawn to set up internal parent/effect pointers.
+    DispatchKeyValue(particle, "targetname", "tf2particle");
+    DispatchKeyValue(particle, "parentname", targetName);
     DispatchKeyValue(particle, "effect_name", particleName);
+
+    // Position at the player BEFORE spawning — prevents the initial
+    // particle burst from appearing at world origin (0,0,0).
+    float pos[3];
+    GetClientAbsOrigin(client, pos);
+
     DispatchSpawn(particle);
+
+    // Parent BEFORE activating — the particle system needs to know its
+    // parent transform when it begins emitting particles.
+    // AlliedModders consensus: Spawn → Parent → Activate → Start.
+    SetVariantString("!activator");
+    AcceptEntityInput(particle, "SetParent", client, particle, 0);
+
     ActivateEntity(particle);
+    TeleportEntity(particle, pos, NULL_VECTOR, NULL_VECTOR);
     AcceptEntityInput(particle, "Start");
 
-    SetVariantString("!activator");
-    AcceptEntityInput(particle, "SetParent", client);
-
     g_iAuraEntity[client] = EntIndexToEntRef(particle);
-    SDKHook(particle, SDKHook_SetTransmit, Hook_AuraTransmit);
-}
 
-public Action Hook_AuraTransmit(int entity, int client)
-{
-    int owner = GetEntPropEnt(entity, Prop_Data, "m_pParent");
-    return (owner == client) ? Plugin_Handled : Plugin_Continue;
+    // Aura is visible to everyone, including the owner.
+    // Taunt unusual particles (utaunt_*) are ground/body-surrounding
+    // effects that don't obstruct first-person gameplay — TF2 players
+    // with real unusual taunts see their own effects natively.
+    // In first person most of the effect is below/around you so it
+    // reads as a subtle glow; in third person it looks awesome.
 }
 
 void RemoveAura(int client)
