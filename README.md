@@ -2,7 +2,7 @@
 
 # TF2 Leveling System
 
-[![Version](https://img.shields.io/badge/version-1.3.1-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
+[![Version](https://img.shields.io/badge/version-1.3.2-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
 [![SourceMod](https://img.shields.io/badge/SourceMod-1.12-orange?style=for-the-badge)](https://www.sourcemod.net/)
 [![License](https://img.shields.io/badge/license-GPL%20v3-green?style=for-the-badge)](LICENSE)
 
@@ -66,6 +66,8 @@ addons/sourcemod/
 │   ├── core.cfg                   ← auto-created if missing
 │   ├── tags.cfg                   ← chat tags by level
 │   └── cosmetics.cfg              ← trails, auras, models
+├── configs/
+│   └── chat_processor.cfg         ← required for chat tags (from Chat Processor)
 ├── translations/
 │   └── leveling.phrases.txt
 └── scripting/
@@ -344,7 +346,7 @@ To add a language, edit `translations/leveling.phrases.txt` and add your languag
 
 **Cosmetics not working** — Check that model/material paths exist on the server. Look for `"Model not precached"` errors in the server console. Auras and models only apply to alive players.
 
-**Chat tags not showing** — Tags work immediately on join (players get a `[Lvl 1]` fallback tag even before database loads). Make sure `chat-processor.smx` is loaded and `leveling_chat.smx` is loaded after `leveling_core.smx`. Check that `tags.cfg` exists and is valid KeyValues. If tags show literal `{default}` text in the menu, update to the latest `leveling_chat.smx` — older versions only stripped `{#RRGGBB}` color codes.
+**Chat tags not showing** — Make sure `chat-processor.smx` is loaded and `configs/chat_processor.cfg` exists on the server (this file defines TF2's message format strings — without it, Chat Processor skips all chat processing silently). Check that `leveling_chat.smx` is loaded after `leveling_core.smx` and that `tags.cfg` exists and is valid KeyValues.
 
 **Database errors** — If MySQL fails (wrong socket, bad credentials, server down), the plugin automatically falls back to SQLite. You will see `[Leveling] Falling back to local SQLite database.` in logs — this is normal and the plugin keeps working. If you see errors from `admin-sql-threaded.smx` about MySQL sockets, that's SourceMod's built-in admin plugin, not the leveling system — check your `databases.cfg` `"default"` section. No database setup is required to use this plugin — it works out of the box with SQLite.
 

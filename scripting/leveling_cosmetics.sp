@@ -9,7 +9,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Cosmetics"
-#define PLUGIN_VERSION "1.3.1"
+#define PLUGIN_VERSION "1.3.2"
 
 public Plugin myinfo =
 {
