@@ -6,7 +6,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Visuals"
-#define PLUGIN_VERSION "1.3.2"
+#define PLUGIN_VERSION "1.4.0"
 
 #define FFADE_IN 0x0001
 
@@ -20,7 +20,7 @@ public Plugin myinfo =
 };
 
 Handle g_HudSync;
-bool   g_bHudEnabled[MAXPLAYERS + 1]; // Per-player XP HUD toggle (default: on)
+bool   g_HudEnabled[MAXPLAYERS + 1]; // Per-player XP HUD toggle (default: on)
 
 public void OnPluginStart()
 {
@@ -31,16 +31,16 @@ public void OnPluginStart()
 
 public void OnClientConnected(int client)
 {
-    g_bHudEnabled[client] = true;
+    g_HudEnabled[client] = true;
 }
 
 public Action Cmd_ToggleHud(int client, int args)
 {
     if (client == 0) return Plugin_Handled;
 
-    g_bHudEnabled[client] = !g_bHudEnabled[client];
+    g_HudEnabled[client] = !g_HudEnabled[client];
 
-    if (g_bHudEnabled[client])
+    if (g_HudEnabled[client])
         PrintToChat(client, "\x04[Leveling]\x01 XP bar \x04enabled\x01.");
     else
     {
@@ -107,7 +107,7 @@ public void Leveling_OnLevelUp(int client, int newLevel)
 void ShowXPBar(int client)
 {
     if (!IsClientInGame(client))          return;
-    if (!g_bHudEnabled[client])           return;
+    if (!g_HudEnabled[client])           return;
 
     int level = Leveling_GetLevel(client);
     if (level >= LEVELING_MAX_LEVEL)      return;

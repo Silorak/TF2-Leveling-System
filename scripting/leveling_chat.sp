@@ -7,7 +7,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Chat Tags"
-#define PLUGIN_VERSION "1.3.2"
+#define PLUGIN_VERSION "1.4.0"
 
 // chat-processor.inc defines MAXLENGTH_NAME as 128 and MAXLENGTH_BUFFER as 255.
 // Tags with multiple {#RRGGBB} codes (9 bytes each) can get large fast.
@@ -90,6 +90,10 @@ public Action CP_OnChatMessage(int& author, ArrayList recipients,
     bool& processcolors, bool& removecolors)
 {
     if (author <= 0 || author > MaxClients || !IsClientInGame(author))
+        return Plugin_Continue;
+
+    // Don't apply tags to bots
+    if (IsFakeClient(author))
         return Plugin_Continue;
 
     // Lazy-rebuild on first message if cache is empty

@@ -6,7 +6,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] VIP"
-#define PLUGIN_VERSION "1.3.2"
+#define PLUGIN_VERSION "1.4.0"
 
 #define VIP_WELCOME_MAX 128
 #define VIP_TAG_MAX     32
@@ -22,9 +22,9 @@ public Plugin myinfo =
     url         = "https://github.com/Silorak/TF2-Leveling-System"
 };
 
-int g_iLastWelcomeChange[MAXPLAYERS + 1];
-int g_iLastTagChange[MAXPLAYERS + 1];
-int g_iRainbowIdx[MAXPLAYERS + 1];
+int g_LastWelcomeChange[MAXPLAYERS + 1];
+int g_LastTagChange[MAXPLAYERS + 1];
+int g_RainbowIdx[MAXPLAYERS + 1];
 
 public void OnPluginStart()
 {
@@ -54,9 +54,9 @@ public Action Timer_Welcome(Handle timer, int userid)
 
 public void OnClientDisconnect(int client)
 {
-    g_iLastWelcomeChange[client] = 0;
-    g_iLastTagChange[client] = 0;
-    g_iRainbowIdx[client] = 0;
+    g_LastWelcomeChange[client] = 0;
+    g_LastTagChange[client] = 0;
+    g_RainbowIdx[client] = 0;
 }
 
 // ============================================================================
@@ -102,14 +102,14 @@ public Action Command_WelcomeMsg(int client, int args)
         return Plugin_Handled;
     }
 
-    if (!CheckCooldown(client, g_iLastWelcomeChange[client]))
+    if (!CheckCooldown(client, g_LastWelcomeChange[client]))
         return Plugin_Handled;
 
     if (args == 0)
     {
         Leveling_SetCustomWelcome(client, "");
         CPrintToChat(client, "%t", "VIP_WelcomeCleared");
-        g_iLastWelcomeChange[client] = GetTime();
+        g_LastWelcomeChange[client] = GetTime();
         Leveling_SavePlayer(client);
         return Plugin_Handled;
     }
@@ -126,7 +126,7 @@ public Action Command_WelcomeMsg(int client, int args)
 
     Leveling_SetCustomWelcome(client, message);
     CPrintToChat(client, "%t", "VIP_WelcomeSet");
-    g_iLastWelcomeChange[client] = GetTime();
+    g_LastWelcomeChange[client] = GetTime();
     Leveling_SavePlayer(client);
 
     return Plugin_Handled;
@@ -140,14 +140,14 @@ public Action Command_CustomTag(int client, int args)
         return Plugin_Handled;
     }
 
-    if (!CheckCooldown(client, g_iLastTagChange[client]))
+    if (!CheckCooldown(client, g_LastTagChange[client]))
         return Plugin_Handled;
 
     if (args == 0)
     {
         Leveling_SetCustomTag(client, "");
         CPrintToChat(client, "%t", "VIP_TagCleared");
-        g_iLastTagChange[client] = GetTime();
+        g_LastTagChange[client] = GetTime();
         Leveling_SavePlayer(client);
         return Plugin_Handled;
     }
@@ -164,7 +164,7 @@ public Action Command_CustomTag(int client, int args)
 
     Leveling_SetCustomTag(client, tag);
     CPrintToChat(client, "%t", "VIP_TagSet");
-    g_iLastTagChange[client] = GetTime();
+    g_LastTagChange[client] = GetTime();
     Leveling_SavePlayer(client);
 
     return Plugin_Handled;
@@ -229,8 +229,8 @@ void ProcessRainbow(int client, const char[] input, char[] output, int maxlen)
     }
 
     // Cycle through rainbow colors sequentially per player
-    int idx = g_iRainbowIdx[client] % sizeof(g_RainbowColors);
-    g_iRainbowIdx[client] = (idx + 1) % sizeof(g_RainbowColors);
+    int idx = g_RainbowIdx[client] % sizeof(g_RainbowColors);
+    g_RainbowIdx[client] = (idx + 1) % sizeof(g_RainbowColors);
 
     strcopy(output, maxlen, input);
     ReplaceString(output, maxlen, "{RAINBOW}", g_RainbowColors[idx], false);

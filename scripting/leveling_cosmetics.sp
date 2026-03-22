@@ -8,8 +8,12 @@
 #include <colorvariables>
 #include <leveling>
 
+#undef REQUIRE_PLUGIN
+#include <tf2attributes>
+#define REQUIRE_PLUGIN
+
 #define PLUGIN_NAME    "[Leveling] Cosmetics"
-#define PLUGIN_VERSION "1.3.2"
+#define PLUGIN_VERSION "1.4.0"
 
 public Plugin myinfo =
 {
@@ -32,30 +36,49 @@ enum struct CosmeticItem
     float startwidth;
     float endwidth;
     float lifetime;
+
+    // Optional properties for pets (from SourcePets approach)
+    char animIdle[64];
+    char animWalk[64];
+    char animJump[64];
+    int heightType;       // 1=ground, 2=hover
+    int heightCustom;     // offset when hover
+    float modelScale;
 }
 
 ArrayList g_TrailList;
 ArrayList g_AuraList;
 ArrayList g_ModelList;
-ArrayList g_EyeList;
+ArrayList g_SheenList;
+ArrayList g_KillstreakerList;
 ArrayList g_DeathList;
 ArrayList g_PetList;
+ArrayList g_SpawnList;
 
-int  g_iTrailEntity[MAXPLAYERS + 1] = { INVALID_ENT_REFERENCE, ... };
-int  g_iAuraEntity[MAXPLAYERS + 1]  = { INVALID_ENT_REFERENCE, ... };
-int  g_iEyeEntityL[MAXPLAYERS + 1]  = { INVALID_ENT_REFERENCE, ... };
-int  g_iEyeEntityR[MAXPLAYERS + 1]  = { INVALID_ENT_REFERENCE, ... };
-int  g_iPetEntity[MAXPLAYERS + 1]   = { INVALID_ENT_REFERENCE, ... };
-bool g_bHasCustomModel[MAXPLAYERS + 1];
+int  g_TrailEntity[MAXPLAYERS + 1] = { INVALID_ENT_REFERENCE, ... };
+int  g_AuraEntity[MAXPLAYERS + 1]  = { INVALID_ENT_REFERENCE, ... };
+int  g_PetEntity[MAXPLAYERS + 1]   = { INVALID_ENT_REFERENCE, ... };
+int  g_PetState[MAXPLAYERS + 1];    // 0=none, 1=idle, 2=walking, 3=jumping
+int  g_PetType[MAXPLAYERS + 1] = { -1, ... }; // index into g_PetList
+bool g_HasCustomModel[MAXPLAYERS + 1];
+bool g_HasKillstreak[MAXPLAYERS + 1];
+bool g_TF2AttribAvailable;
+
+#define PET_STATE_NONE    0
+#define PET_STATE_IDLE    1
+#define PET_STATE_WALKING 2
+#define PET_STATE_JUMPING 3
 
 public void OnPluginStart()
 {
     g_TrailList = new ArrayList(sizeof(CosmeticItem));
     g_AuraList  = new ArrayList(sizeof(CosmeticItem));
     g_ModelList = new ArrayList(sizeof(CosmeticItem));
-    g_EyeList   = new ArrayList(sizeof(CosmeticItem));
+    g_SheenList        = new ArrayList(sizeof(CosmeticItem));
+    g_KillstreakerList = new ArrayList(sizeof(CosmeticItem));
     g_DeathList = new ArrayList(sizeof(CosmeticItem));
     g_PetList   = new ArrayList(sizeof(CosmeticItem));
+    g_SpawnList = new ArrayList(sizeof(CosmeticItem));
 
     LoadTranslations("leveling.phrases");
 
@@ -64,6 +87,51 @@ public void OnPluginStart()
 
     HookEvent("player_spawn", Event_PlayerSpawn);
     HookEvent("player_death", Event_PlayerDeath);
+    HookEvent("post_inventory_application", Event_Inventory);
+}
+
+// Fires when TF2 gives a player their loadout (spawn, resupply locker, loadout change).
+// Weapon entities get recreated, so our killstreak attributes are lost — reapply them.
+public Action Event_Inventory(Event event, const char[] name, bool dontBroadcast)
+{
+    int client = GetClientOfUserId(event.GetInt("userid"));
+    if (client < 1 || !IsClientInGame(client) || IsFakeClient(client))
+        return Plugin_Continue;
+
+    if (!Leveling_IsDataLoaded(client))
+        return Plugin_Continue;
+
+    // Delay slightly so TF2 finishes setting up weapon entities
+    CreateTimer(0.3, Timer_ReapplyKillstreak, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
+    return Plugin_Continue;
+}
+
+public Action Timer_ReapplyKillstreak(Handle timer, int userid)
+{
+    int client = GetClientOfUserId(userid);
+    if (client < 1 || !IsClientInGame(client) || !IsPlayerAlive(client))
+        return Plugin_Stop;
+
+    CreateEyeEffects(client);
+
+    return Plugin_Stop;
+}
+
+public void OnAllPluginsLoaded()
+{
+    g_TF2AttribAvailable = LibraryExists("tf2attributes");
+}
+
+public void OnLibraryAdded(const char[] name)
+{
+    if (StrEqual(name, "tf2attributes"))
+        g_TF2AttribAvailable = true;
+}
+
+public void OnLibraryRemoved(const char[] name)
+{
+    if (StrEqual(name, "tf2attributes"))
+        g_TF2AttribAvailable = false;
 }
 
 public void OnMapStart()
@@ -75,7 +143,10 @@ public void OnMapStart()
 public void OnClientDisconnect(int client)
 {
     RemoveAllCosmetics(client);
-    g_bHasCustomModel[client] = false;
+    g_HasCustomModel[client] = false;
+    g_HasKillstreak[client] = false;
+    g_PetState[client] = PET_STATE_NONE;
+    g_PetType[client] = -1;
 }
 
 void RemoveAllCosmetics(int client)
@@ -89,6 +160,9 @@ void RemoveAllCosmetics(int client)
 
 public void Leveling_OnDataLoaded(int client)
 {
+    if (!IsClientInGame(client))
+        return;
+
     if (IsPlayerAlive(client))
         ApplyCosmetics(client);
 }
@@ -114,7 +188,7 @@ public Action Hook_WearableTransmit(int entity, int client)
     int owner = GetEntPropEnt(entity, Prop_Send, "m_hOwnerEntity");
     
     // Only hide wearables for players using a custom model
-    if (owner > 0 && owner <= MaxClients && g_bHasCustomModel[owner])
+    if (owner > 0 && owner <= MaxClients && g_HasCustomModel[owner])
         return Plugin_Handled;
     
     return Plugin_Continue;
@@ -145,19 +219,18 @@ void ApplyCosmetics(int client)
     if (buffer[0] != '\0')
         SetPlayerModel(client, buffer);
 
-    // Eye Effects
-    Leveling_GetEquipped(client, Cosmetic_Eye, buffer, sizeof(buffer));
-    if (buffer[0] != '\0')
-        CreateEyeEffects(client, buffer);
+    // Killstreak (Sheen + Eye Effect) — applied together
+    CreateEyeEffects(client);
 
     // Pet
     Leveling_GetEquipped(client, Cosmetic_Pet, buffer, sizeof(buffer));
     if (buffer[0] != '\0')
         CreatePet(client, buffer);
 
-    // Spawn particle for level 3+
-    if (Leveling_GetLevel(client) >= 3)
-        CreateSpawnParticle(client);
+    // Spawn particle (one-shot effect on each respawn)
+    Leveling_GetEquipped(client, Cosmetic_Spawn, buffer, sizeof(buffer));
+    if (buffer[0] != '\0')
+        CreateSpawnParticle(client, buffer);
 }
 
 // (RemoveAllCosmetics is defined above near OnClientDisconnect)
@@ -188,10 +261,14 @@ void CreateTrail(int client, const char[] material)
         g_TrailList.GetArray(i, item);
         if (StrEqual(item.value, material))
         {
-            strcopy(color, sizeof(color), item.color);
-            startwidth = item.startwidth;
-            endwidth = item.endwidth;
-            lifetime = item.lifetime;
+            if (item.color[0] != '\0')
+                strcopy(color, sizeof(color), item.color);
+            if (item.startwidth > 0.0)
+                startwidth = item.startwidth;
+            if (item.endwidth > 0.0)
+                endwidth = item.endwidth;
+            if (item.lifetime > 0.0)
+                lifetime = item.lifetime;
             break;
         }
     }
@@ -218,18 +295,18 @@ void CreateTrail(int client, const char[] material)
     SetVariantString("!activator");
     AcceptEntityInput(trail, "SetParent", client);
 
-    g_iTrailEntity[client] = EntIndexToEntRef(trail);
+    g_TrailEntity[client] = EntIndexToEntRef(trail);
 }
 
 void RemoveTrail(int client)
 {
-    if (g_iTrailEntity[client] != INVALID_ENT_REFERENCE)
+    if (g_TrailEntity[client] != INVALID_ENT_REFERENCE)
     {
-        int entity = EntRefToEntIndex(g_iTrailEntity[client]);
+        int entity = EntRefToEntIndex(g_TrailEntity[client]);
         if (entity != INVALID_ENT_REFERENCE)
             AcceptEntityInput(entity, "Kill");
     }
-    g_iTrailEntity[client] = INVALID_ENT_REFERENCE;
+    g_TrailEntity[client] = INVALID_ENT_REFERENCE;
 }
 
 // ============================================================================
@@ -241,57 +318,49 @@ void CreateAura(int client, const char[] particleName)
     RemoveAura(client);
 
     int particle = CreateEntityByName("info_particle_system");
-    if (particle == -1) return;
+    if (!IsValidEntity(particle)) return;
 
-    // Give the player entity a targetname so the particle can reference
-    // it via parentname keyvalue (the reliable entity I/O approach used
-    // by rmf's AttachLoopParticleBone stock and Pelipoika's plugins).
-    char targetName[32];
-    Format(targetName, sizeof(targetName), "lvlplayer%d", GetClientUserId(client));
-    DispatchKeyValue(client, "targetname", targetName);
-
-    // Set particle keyvalues BEFORE spawn — the engine reads these during
-    // DispatchSpawn to set up internal parent/effect pointers.
-    DispatchKeyValue(particle, "targetname", "tf2particle");
-    DispatchKeyValue(particle, "parentname", targetName);
-    DispatchKeyValue(particle, "effect_name", particleName);
-
-    // Position at the player BEFORE spawning — prevents the initial
-    // particle burst from appearing at world origin (0,0,0).
     float pos[3];
     GetClientAbsOrigin(client, pos);
 
+    // Reuse or assign a targetname on the player (same approach as guardian plugin).
+    char targetName[64];
+    GetEntPropString(client, Prop_Data, "m_iName", targetName, sizeof(targetName));
+    if (targetName[0] == '\0')
+    {
+        Format(targetName, sizeof(targetName), "lvlplayer%d", client);
+        DispatchKeyValue(client, "targetname", targetName);
+    }
+
+    DispatchKeyValue(particle, "effect_name", particleName);
+    DispatchKeyValueVector(particle, "origin", pos);
+
     DispatchSpawn(particle);
-
-    // Parent BEFORE activating — the particle system needs to know its
-    // parent transform when it begins emitting particles.
-    // AlliedModders consensus: Spawn → Parent → Activate → Start.
-    SetVariantString("!activator");
-    AcceptEntityInput(particle, "SetParent", client, particle, 0);
-
     ActivateEntity(particle);
-    TeleportEntity(particle, pos, NULL_VECTOR, NULL_VECTOR);
     AcceptEntityInput(particle, "Start");
 
-    g_iAuraEntity[client] = EntIndexToEntRef(particle);
+    // Parent to player using their targetname.
+    SetVariantString(targetName);
+    AcceptEntityInput(particle, "SetParent", client, particle, 0);
 
-    // Aura is visible to everyone, including the owner.
-    // Taunt unusual particles (utaunt_*) are ground/body-surrounding
-    // effects that don't obstruct first-person gameplay — TF2 players
-    // with real unusual taunts see their own effects natively.
-    // In first person most of the effect is below/around you so it
-    // reads as a subtle glow; in third person it looks awesome.
+    // Most utaunt_*_parent particles are ground-ring/feet effects designed to
+    // emit from entity origin.  Do NOT attach them to a bone — that displaces
+    // and flips the effect.  Only attach non-parent utaunt particles (rare)
+    // to "flag" if they're meant to float around the body.
+    if (StrContains(particleName, "_parent", false) == -1
+        && StrContains(particleName, "utaunt_", false) == -1)
+    {
+        SetVariantString("flag");
+        AcceptEntityInput(particle, "SetParentAttachment", client, particle, 0);
+    }
+
+    g_AuraEntity[client] = EntIndexToEntRef(particle);
 }
 
 void RemoveAura(int client)
 {
-    if (g_iAuraEntity[client] != INVALID_ENT_REFERENCE)
-    {
-        int entity = EntRefToEntIndex(g_iAuraEntity[client]);
-        if (entity != INVALID_ENT_REFERENCE)
-            AcceptEntityInput(entity, "Kill");
-    }
-    g_iAuraEntity[client] = INVALID_ENT_REFERENCE;
+    KillEntRef(g_AuraEntity[client]);
+    g_AuraEntity[client] = INVALID_ENT_REFERENCE;
 }
 
 // ============================================================================
@@ -311,19 +380,19 @@ void SetPlayerModel(int client, const char[] modelPath)
     SetVariantString(modelPath);
     AcceptEntityInput(client, "SetCustomModel");
     SetEntProp(client, Prop_Send, "m_bUseClassAnimations", 1);
-    g_bHasCustomModel[client] = true;
+    g_HasCustomModel[client] = true;
 }
 
 void RestoreModel(int client)
 {
-    if (g_bHasCustomModel[client])
+    if (g_HasCustomModel[client])
     {
         if (IsClientInGame(client) && IsPlayerAlive(client))
         {
             SetVariantString("");
             AcceptEntityInput(client, "SetCustomModel");
         }
-        g_bHasCustomModel[client] = false;
+        g_HasCustomModel[client] = false;
     }
 }
 
@@ -331,22 +400,22 @@ void RestoreModel(int client)
 // SPAWN PARTICLE
 // ============================================================================
 
-void CreateSpawnParticle(int client)
+void CreateSpawnParticle(int client, const char[] particleName = "achieved")
 {
     int particle = CreateEntityByName("info_particle_system");
-    if (particle == -1) return;
+    if (!IsValidEntity(particle)) return;
 
-    DispatchKeyValue(particle, "effect_name", "achieved");
-    DispatchSpawn(particle);
+    DispatchKeyValue(particle, "effect_name", particleName);
 
     float pos[3];
     GetClientAbsOrigin(client, pos);
-    TeleportEntity(particle, pos, NULL_VECTOR, NULL_VECTOR);
 
+    DispatchKeyValueVector(particle, "origin", pos);
+    DispatchSpawn(particle);
     ActivateEntity(particle);
     AcceptEntityInput(particle, "Start");
 
-    CreateTimer(2.0, Timer_KillEntity, EntIndexToEntRef(particle), TIMER_FLAG_NO_MAPCHANGE);
+    CreateTimer(3.0, Timer_KillEntity, EntIndexToEntRef(particle), TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_KillEntity(Handle timer, int ref)
@@ -358,43 +427,78 @@ public Action Timer_KillEntity(Handle timer, int ref)
 }
 
 // ============================================================================
-// EYE EFFECTS (killstreak-style particles on eyeglow attachment points)
+// EYE EFFECTS (Professional Killstreak via TF2Attributes)
 // ============================================================================
+// Config "effect" value format: "effectID;sheenID"
+// effectID: 2002=Fire Horns, 2003=Cerebral Discharge, 2004=Tornado,
+//           2005=Flames, 2006=Singularity, 2007=Incinerator, 2008=Hypno-Beam
+// sheenID:  1=Team Shine, 2=Deadly Daffodil, 3=Manndarin, 4=Mean Green,
+//           5=Agonizing Emerald, 6=Villainous Violet, 7=Hot Rod
 
-void CreateEyeEffects(int client, const char[] particleName)
+void CreateEyeEffects(int client)
 {
     RemoveEyeEffects(client);
 
-    int particleL = AttachParticleToPoint(client, particleName, "eyeglow_L");
-    int particleR = AttachParticleToPoint(client, particleName, "eyeglow_R");
-    g_iEyeEntityL[client] = (particleL != -1) ? EntIndexToEntRef(particleL) : INVALID_ENT_REFERENCE;
-    g_iEyeEntityR[client] = (particleR != -1) ? EntIndexToEntRef(particleR) : INVALID_ENT_REFERENCE;
-}
+    if (!g_TF2AttribAvailable) return;
+    if (!IsClientInGame(client) || !IsPlayerAlive(client)) return;
 
-int AttachParticleToPoint(int client, const char[] particleName, const char[] attachPoint)
-{
-    int particle = CreateEntityByName("info_particle_system");
-    if (particle == -1) return -1;
+    // Read both equipped values
+    char sheenStr[64], killstreakerStr[64];
+    Leveling_GetEquipped(client, Cosmetic_Sheen, sheenStr, sizeof(sheenStr));
+    Leveling_GetEquipped(client, Cosmetic_Killstreaker, killstreakerStr, sizeof(killstreakerStr));
 
-    DispatchKeyValue(particle, "effect_name", particleName);
-    DispatchSpawn(particle);
-    ActivateEntity(particle);
+    // Nothing equipped at all
+    if (sheenStr[0] == '\0' && killstreakerStr[0] == '\0') return;
 
-    SetVariantString("!activator");
-    AcceptEntityInput(particle, "SetParent", client);
-    SetVariantString(attachPoint);
-    AcceptEntityInput(particle, "SetParentAttachment", particle, particle);
+    int sheenId = StringToInt(sheenStr);           // 1-7 or 0
+    int effectId = StringToInt(killstreakerStr);   // 2002-2008 or 0
 
-    AcceptEntityInput(particle, "Start");
-    return particle;
+    g_HasKillstreak[client] = true;
+
+    for (int slot = 0; slot < 6; slot++)
+    {
+        int weapon = GetPlayerWeaponSlot(client, slot);
+        if (!IsValidEntity(weapon)) continue;
+
+        // Always enable killstreak counter
+        TF2Attrib_SetByDefIndex(weapon, 2025, 1.0);
+
+        // Sheen (colored weapon glow)
+        if (sheenId >= 1 && sheenId <= 7)
+            TF2Attrib_SetByDefIndex(weapon, 2014, float(sheenId));
+
+        // Killstreaker (eye particle effect) — needs 5+ streak to show
+        if (effectId >= 2002 && effectId <= 2008)
+            TF2Attrib_SetByDefIndex(weapon, 2013, float(effectId));
+    }
+
+    // Eye effects only render at 5+ kill streak.
+    // Since dodgeball doesn't have normal kill-based streaks,
+    // we fake a 10-kill streak so the effect is always visible.
+    if (effectId >= 2002 && effectId <= 2008)
+        SetEntProp(client, Prop_Send, "m_nStreaks", 10, _, 0);
 }
 
 void RemoveEyeEffects(int client)
 {
-    KillEntRef(g_iEyeEntityL[client]);
-    g_iEyeEntityL[client] = INVALID_ENT_REFERENCE;
-    KillEntRef(g_iEyeEntityR[client]);
-    g_iEyeEntityR[client] = INVALID_ENT_REFERENCE;
+    if (!g_HasKillstreak[client]) return;
+    g_HasKillstreak[client] = false;
+
+    if (!g_TF2AttribAvailable) return;
+    if (!IsClientInGame(client)) return;
+
+    for (int slot = 0; slot < 6; slot++)
+    {
+        int weapon = GetPlayerWeaponSlot(client, slot);
+        if (!IsValidEntity(weapon)) continue;
+
+        TF2Attrib_RemoveByDefIndex(weapon, 2025);
+        TF2Attrib_RemoveByDefIndex(weapon, 2013);
+        TF2Attrib_RemoveByDefIndex(weapon, 2014);
+    }
+
+    if (IsPlayerAlive(client))
+        SetEntProp(client, Prop_Send, "m_nStreaks", 0, _, 0);
 }
 
 // ============================================================================
@@ -410,9 +514,17 @@ public Action Event_PlayerDeath(Event event, const char[] name, bool dontBroadca
     if (event.GetInt("death_flags") & 32) // TF_DEATHFLAG_DEADRINGER
         return Plugin_Continue;
 
-    // Clean up eye effects and pet on real death (they linger on the invisible body otherwise)
+    // Clean up all visual entities on real death so they don't follow
+    // the player into spectate mode.
+    // Aura and trail use fade-kill (Stop now, Kill after 0.5s) so particles
+    // have time to finish their emission cycle without leaving decals.
+    FadeKillEntRef(g_TrailEntity[victim]);
+    g_TrailEntity[victim] = INVALID_ENT_REFERENCE;
+    FadeKillEntRef(g_AuraEntity[victim]);
+    g_AuraEntity[victim] = INVALID_ENT_REFERENCE;
     RemoveEyeEffects(victim);
     RemovePet(victim);
+    RestoreModel(victim);
 
     char deathEffect[64];
     Leveling_GetEquipped(victim, Cosmetic_Death, deathEffect, sizeof(deathEffect));
@@ -477,7 +589,7 @@ void SpawnTempParticle(float pos[3], const char[] particleName, float duration)
 }
 
 // ============================================================================
-// PET (parented prop_dynamic follower)
+// PET (free-moving prop_dynamic with PreThink AI — SourcePets approach)
 // ============================================================================
 
 void CreatePet(int client, const char[] modelPath)
@@ -490,37 +602,212 @@ void CreatePet(int client, const char[] modelPath)
         return;
     }
 
+    // Find the pet config entry so we can use its animations/height/scale
+    int petIndex = -1;
+    for (int i = 0; i < g_PetList.Length; i++)
+    {
+        CosmeticItem item;
+        g_PetList.GetArray(i, item);
+        if (StrEqual(item.value, modelPath))
+        {
+            petIndex = i;
+            break;
+        }
+    }
+
     int pet = CreateEntityByName("prop_dynamic_override");
-    if (pet == -1) return;
+    if (!IsValidEntity(pet)) return;
 
-    DispatchKeyValue(pet, "model", modelPath);
-    DispatchKeyValue(pet, "solid", "0");           // No collision
+    DispatchKeyValue(pet, "targetname", "leveling_pet");
+    SetEntityModel(pet, modelPath);
+    DispatchKeyValue(pet, "solid", "0");
     DispatchSpawn(pet);
+    ActivateEntity(pet);
 
-    // Try to play idle animation — silently fails on models without it
-    SetVariantString("idle");
-    AcceptEntityInput(pet, "SetAnimation");
-
-    // Position above and behind the player's head
+    // Position near owner with random offset
     float pos[3];
     GetClientAbsOrigin(client, pos);
-    pos[2] += 80.0;
-
+    pos[0] += GetRandomFloat(-64.0, 64.0);
+    pos[1] += GetRandomFloat(-64.0, 64.0);
     TeleportEntity(pet, pos, NULL_VECTOR, NULL_VECTOR);
 
-    SetVariantString("!activator");
-    AcceptEntityInput(pet, "SetParent", client);
+    // Apply model scale from config (default 0.5)
+    float scale = 0.5;
+    if (petIndex >= 0)
+    {
+        CosmeticItem item;
+        g_PetList.GetArray(petIndex, item);
+        if (item.modelScale > 0.0)
+            scale = item.modelScale;
+    }
+    SetEntPropFloat(pet, Prop_Send, "m_flModelScale", scale);
 
-    // Scale down to 50% for a "mini" companion look
-    SetEntPropFloat(pet, Prop_Send, "m_flModelScale", 0.5);
+    // Start idle animation
+    if (petIndex >= 0)
+    {
+        CosmeticItem item;
+        g_PetList.GetArray(petIndex, item);
+        if (item.animIdle[0] != '\0')
+        {
+            SetVariantString(item.animIdle);
+            AcceptEntityInput(pet, "SetAnimation");
+        }
+    }
 
-    g_iPetEntity[client] = EntIndexToEntRef(pet);
+    g_PetEntity[client] = EntIndexToEntRef(pet);
+    g_PetType[client] = petIndex;
+    g_PetState[client] = PET_STATE_IDLE;
+
+    // Hook PreThink to drive pet movement every tick
+    SDKHook(client, SDKHook_PreThink, Hook_PetThink);
 }
 
 void RemovePet(int client)
 {
-    KillEntRef(g_iPetEntity[client]);
-    g_iPetEntity[client] = INVALID_ENT_REFERENCE;
+    if (g_PetEntity[client] != INVALID_ENT_REFERENCE)
+    {
+        int entity = EntRefToEntIndex(g_PetEntity[client]);
+        if (entity != -1 && IsValidEntity(entity))
+            AcceptEntityInput(entity, "Kill");
+    }
+    g_PetEntity[client] = INVALID_ENT_REFERENCE;
+    g_PetState[client] = PET_STATE_NONE;
+    g_PetType[client] = -1;
+    SDKUnhook(client, SDKHook_PreThink, Hook_PetThink);
+}
+
+void SetPetAnimation(int client, const char[] anim)
+{
+    int entity = EntRefToEntIndex(g_PetEntity[client]);
+    if (entity == -1 || !IsValidEntity(entity)) return;
+    SetVariantString(anim);
+    AcceptEntityInput(entity, "SetAnimation");
+}
+
+void SetPetState(int client, int state)
+{
+    if (g_PetState[client] == state) return;
+    g_PetState[client] = state;
+
+    if (g_PetType[client] < 0) return;
+
+    CosmeticItem item;
+    g_PetList.GetArray(g_PetType[client], item);
+
+    switch (state)
+    {
+        case PET_STATE_IDLE:
+        {
+            if (item.animIdle[0] != '\0')
+                SetPetAnimation(client, item.animIdle);
+        }
+        case PET_STATE_WALKING:
+        {
+            if (item.animWalk[0] != '\0')
+                SetPetAnimation(client, item.animWalk);
+        }
+        case PET_STATE_JUMPING:
+        {
+            if (item.animJump[0] != '\0')
+                SetPetAnimation(client, item.animJump);
+        }
+    }
+}
+
+public void Hook_PetThink(int client)
+{
+    if (!IsClientInGame(client) || !IsPlayerAlive(client))
+    {
+        RemovePet(client);
+        return;
+    }
+
+    int petEnt = EntRefToEntIndex(g_PetEntity[client]);
+    if (petEnt == -1 || !IsValidEntity(petEnt))
+    {
+        SDKUnhook(client, SDKHook_PreThink, Hook_PetThink);
+        g_PetEntity[client] = INVALID_ENT_REFERENCE;
+        g_PetState[client] = PET_STATE_NONE;
+        g_PetType[client] = -1;
+        return;
+    }
+
+    // Hide pet while player is cloaked or disguised
+    if (TF2_IsPlayerInCondition(client, TFCond_Cloaked) || TF2_IsPlayerInCondition(client, TFCond_Disguised))
+        return;
+
+    float petPos[3], petAng[3], clientPos[3];
+    GetEntPropVector(petEnt, Prop_Data, "m_vecOrigin", petPos);
+    GetEntPropVector(petEnt, Prop_Data, "m_angRotation", petAng);
+    GetClientAbsOrigin(client, clientPos);
+
+    // Target height
+    float targetZ = clientPos[2];
+    if (g_PetType[client] >= 0)
+    {
+        CosmeticItem item;
+        g_PetList.GetArray(g_PetType[client], item);
+        if (item.heightType == 2 && item.heightCustom > 0)
+            targetZ = clientPos[2] + float(item.heightCustom);
+    }
+
+    float dist = GetVectorDistance(clientPos, petPos);
+
+    // Emergency teleport if too far
+    if (dist > 1024.0)
+    {
+        float newPos[3];
+        newPos[0] = clientPos[0] + GetRandomFloat(-64.0, 64.0);
+        newPos[1] = clientPos[1] + GetRandomFloat(-64.0, 64.0);
+        newPos[2] = targetZ;
+        TeleportEntity(petEnt, newPos, NULL_VECTOR, NULL_VECTOR);
+        return;
+    }
+
+    // Smooth exponential lerp toward owner position.
+    // Position-based teleport — proven SourcePets approach.
+    float deadzone = 40.0;
+    float speed = (dist - deadzone) / 54.0;
+    if (speed < -4.0) speed = -4.0;
+    if (speed > 4.0) speed = 4.0;
+    if (FloatAbs(speed) < 0.3)
+        speed *= 0.1;
+
+    if (dist > deadzone)
+    {
+        if (petPos[0] < clientPos[0]) petPos[0] += speed;
+        if (petPos[0] > clientPos[0]) petPos[0] -= speed;
+        if (petPos[1] < clientPos[1]) petPos[1] += speed;
+        if (petPos[1] > clientPos[1]) petPos[1] -= speed;
+    }
+
+    // Z lerp — smooth toward target height
+    petPos[2] += (targetZ - petPos[2]) * 0.08;
+
+    // Animation states
+    if (!(GetEntityFlags(client) & FL_ONGROUND))
+        SetPetState(client, PET_STATE_JUMPING);
+    else if (FloatAbs(speed) > 0.2)
+        SetPetState(client, PET_STATE_WALKING);
+    else
+        SetPetState(client, PET_STATE_IDLE);
+
+    // Smooth yaw toward owner
+    if (dist > 32.0)
+    {
+        float distX = clientPos[0] - petPos[0];
+        float distY = clientPos[1] - petPos[1];
+        float targetYaw = (ArcTangent2(distY, distX) * 180.0) / 3.14159;
+        float currentYaw = petAng[1];
+
+        float diff = targetYaw - currentYaw;
+        while (diff > 180.0) diff -= 360.0;
+        while (diff < -180.0) diff += 360.0;
+
+        petAng[1] = currentYaw + diff * 0.1;
+    }
+
+    TeleportEntity(petEnt, petPos, petAng, NULL_VECTOR);
 }
 
 // ============================================================================
@@ -529,11 +816,27 @@ void RemovePet(int client)
 
 void KillEntRef(int ref)
 {
-    if (ref != INVALID_ENT_REFERENCE)
+    if (ref == INVALID_ENT_REFERENCE) return;
+
+    int entity = EntRefToEntIndex(ref);
+    if (entity != -1 && IsValidEntity(entity))
     {
-        int entity = EntRefToEntIndex(ref);
-        if (entity != INVALID_ENT_REFERENCE)
-            AcceptEntityInput(entity, "Kill");
+        AcceptEntityInput(entity, "Stop");
+        AcceptEntityInput(entity, "Kill");
+    }
+}
+
+// Stop the particle immediately (no new emissions) but delay the Kill
+// so existing particles have time to fade out instead of leaving decals.
+void FadeKillEntRef(int ref)
+{
+    if (ref == INVALID_ENT_REFERENCE) return;
+
+    int entity = EntRefToEntIndex(ref);
+    if (entity != -1 && IsValidEntity(entity))
+    {
+        AcceptEntityInput(entity, "Stop");
+        CreateTimer(0.5, Timer_KillEntity, EntIndexToEntRef(entity), TIMER_FLAG_NO_MAPCHANGE);
     }
 }
 
@@ -565,12 +868,16 @@ void OpenEquipMenu(int client)
     menu.AddItem(info, "Auras");
     IntToString(view_as<int>(Cosmetic_Model), info, sizeof(info));
     menu.AddItem(info, "Models");
-    IntToString(view_as<int>(Cosmetic_Eye), info, sizeof(info));
-    menu.AddItem(info, "Eye Effects");
+    IntToString(view_as<int>(Cosmetic_Sheen), info, sizeof(info));
+    menu.AddItem(info, "Sheens");
+    IntToString(view_as<int>(Cosmetic_Killstreaker), info, sizeof(info));
+    menu.AddItem(info, "Killstreakers");
     IntToString(view_as<int>(Cosmetic_Death), info, sizeof(info));
     menu.AddItem(info, "Death Effects");
     IntToString(view_as<int>(Cosmetic_Pet), info, sizeof(info));
     menu.AddItem(info, "Pets");
+    IntToString(view_as<int>(Cosmetic_Spawn), info, sizeof(info));
+    menu.AddItem(info, "Spawn Particles");
     menu.AddItem("unequip", "Unequip All");
     menu.Display(client, MENU_TIME_FOREVER);
 }
@@ -587,9 +894,11 @@ public int Handler_EquipMenu(Menu menu, MenuAction action, int param1, int param
             Leveling_SetEquipped(param1, Cosmetic_Trail, "");
             Leveling_SetEquipped(param1, Cosmetic_Aura, "");
             Leveling_SetEquipped(param1, Cosmetic_Model, "");
-            Leveling_SetEquipped(param1, Cosmetic_Eye, "");
+            Leveling_SetEquipped(param1, Cosmetic_Sheen, "");
+            Leveling_SetEquipped(param1, Cosmetic_Killstreaker, "");
             Leveling_SetEquipped(param1, Cosmetic_Death, "");
             Leveling_SetEquipped(param1, Cosmetic_Pet, "");
+            Leveling_SetEquipped(param1, Cosmetic_Spawn, "");
             RemoveAllCosmetics(param1);
             CPrintToChat(param1, "%t", "Cosmetics_UnequipAll");
             OpenEquipMenu(param1);
@@ -614,13 +923,20 @@ void OpenCosmeticList(int client, CosmeticType type)
         case Cosmetic_Trail: strcopy(title, sizeof(title), "Trails");
         case Cosmetic_Aura:  strcopy(title, sizeof(title), "Auras");
         case Cosmetic_Model: strcopy(title, sizeof(title), "Models");
-        case Cosmetic_Eye:   strcopy(title, sizeof(title), "Eye Effects");
+        case Cosmetic_Sheen:        strcopy(title, sizeof(title), "Sheens");
+        case Cosmetic_Killstreaker: strcopy(title, sizeof(title), "Killstreakers");
         case Cosmetic_Death: strcopy(title, sizeof(title), "Death Effects");
         case Cosmetic_Pet:   strcopy(title, sizeof(title), "Pets");
+        case Cosmetic_Spawn: strcopy(title, sizeof(title), "Spawn Particles");
     }
 
     Menu menu = new Menu(Handler_CosmeticList);
     menu.SetTitle("Select %s", title);
+
+    // Per-type unequip option
+    char unequipInfo[16];
+    Format(unequipInfo, sizeof(unequipInfo), "%d|", view_as<int>(type));
+    menu.AddItem(unequipInfo, "-- Unequip --");
 
     ArrayList list = null;
     switch (type)
@@ -628,10 +944,16 @@ void OpenCosmeticList(int client, CosmeticType type)
         case Cosmetic_Trail: list = g_TrailList;
         case Cosmetic_Aura:  list = g_AuraList;
         case Cosmetic_Model: list = g_ModelList;
-        case Cosmetic_Eye:   list = g_EyeList;
+        case Cosmetic_Sheen:        list = g_SheenList;
+        case Cosmetic_Killstreaker: list = g_KillstreakerList;
         case Cosmetic_Death: list = g_DeathList;
         case Cosmetic_Pet:   list = g_PetList;
+        case Cosmetic_Spawn: list = g_SpawnList;
     }
+
+    // Get currently equipped value for this type to mark it
+    char currentEquipped[128];
+    Leveling_GetEquipped(client, type, currentEquipped, sizeof(currentEquipped));
 
     if (list != null)
     {
@@ -646,10 +968,16 @@ void OpenCosmeticList(int client, CosmeticType type)
 
             bool hasLevel = (item.level <= playerLevel);
             bool hasFlag  = (item.flag == 0 || CheckCommandAccess(client, "sm_cosmetic_flag", item.flag, true));
+            bool isEquipped = StrEqual(item.value, currentEquipped);
 
             if (hasLevel && hasFlag)
             {
-                menu.AddItem(info, item.name);
+                char display[128];
+                if (isEquipped)
+                    Format(display, sizeof(display), "★ %s", item.name);
+                else
+                    strcopy(display, sizeof(display), item.name);
+                menu.AddItem(info, display);
             }
             else
             {
@@ -689,6 +1017,23 @@ public int Handler_CosmeticList(Menu menu, MenuAction action, int param1, int pa
 
         Leveling_SetEquipped(param1, type, value);
 
+        // Empty value = unequip. Remove the entity and notify.
+        if (value[0] == '\0')
+        {
+            switch (type)
+            {
+                case Cosmetic_Trail: RemoveTrail(param1);
+                case Cosmetic_Aura:  RemoveAura(param1);
+                case Cosmetic_Model: RestoreModel(param1);
+                case Cosmetic_Sheen:        RemoveEyeEffects(param1);
+                case Cosmetic_Killstreaker: RemoveEyeEffects(param1);
+                case Cosmetic_Pet:   RemovePet(param1);
+            }
+            CPrintToChat(param1, "{green}[Leveling]{default} Unequipped.");
+            OpenEquipMenu(param1);
+            return 0;
+        }
+
         // Remove the old entity of this specific type before applying new one
         switch (type)
         {
@@ -710,11 +1055,17 @@ public int Handler_CosmeticList(Menu menu, MenuAction action, int param1, int pa
                 SetPlayerModel(param1, value);
                 CPrintToChat(param1, "%t", "Model_Equipped", display);
             }
-            case Cosmetic_Eye:
+            case Cosmetic_Sheen:
             {
                 RemoveEyeEffects(param1);
-                CreateEyeEffects(param1, value);
-                CPrintToChat(param1, "%t", "Eye_Equipped", display);
+                CreateEyeEffects(param1);
+                CPrintToChat(param1, "{green}[Leveling]{default} Sheen equipped: {green}%s", display);
+            }
+            case Cosmetic_Killstreaker:
+            {
+                RemoveEyeEffects(param1);
+                CreateEyeEffects(param1);
+                CPrintToChat(param1, "{green}[Leveling]{default} Killstreaker equipped: {green}%s", display);
             }
             case Cosmetic_Death:
             {
@@ -725,6 +1076,12 @@ public int Handler_CosmeticList(Menu menu, MenuAction action, int param1, int pa
                 RemovePet(param1);
                 CreatePet(param1, value);
                 CPrintToChat(param1, "%t", "Pet_Equipped", display);
+            }
+            case Cosmetic_Spawn:
+            {
+                // Preview it immediately
+                CreateSpawnParticle(param1, value);
+                CPrintToChat(param1, "{green}[Leveling]{default} Spawn particle equipped: {green}%s", display);
             }
         }
 
@@ -747,9 +1104,11 @@ void LoadCosmetics()
     g_TrailList.Clear();
     g_AuraList.Clear();
     g_ModelList.Clear();
-    g_EyeList.Clear();
+    g_SheenList.Clear();
+    g_KillstreakerList.Clear();
     g_DeathList.Clear();
     g_PetList.Clear();
+    g_SpawnList.Clear();
 
     char path[PLATFORM_MAX_PATH];
     BuildPath(Path_SM, path, sizeof(path), "configs/leveling/cosmetics.cfg");
@@ -766,9 +1125,11 @@ void LoadCosmetics()
     ParseSection(kv, "Trails", g_TrailList, "material");
     ParseSection(kv, "Auras",  g_AuraList,  "effect");
     ParseSection(kv, "Models", g_ModelList,  "model");
-    ParseSection(kv, "Eyes",   g_EyeList,   "particle");
+    ParseSection(kv, "Sheens",        g_SheenList,        "sheen");
+    ParseSection(kv, "Killstreakers", g_KillstreakerList, "effect");
     ParseSection(kv, "Deaths", g_DeathList,  "effect");
     ParseSection(kv, "Pets",   g_PetList,    "model");
+    ParseSection(kv, "Spawns", g_SpawnList,  "effect");
 
     delete kv;
 }
@@ -798,6 +1159,17 @@ void ParseSection(KeyValues kv, const char[] section, ArrayList list, const char
                 item.startwidth = kv.GetFloat("startwidth", 20.0);
                 item.endwidth = kv.GetFloat("endwidth", 1.0);
                 item.lifetime = kv.GetFloat("lifetime", 2.0);
+            }
+
+            // Optional Pet parameters (animations, height, scale)
+            if (StrEqual(section, "Pets"))
+            {
+                kv.GetString("anim_idle", item.animIdle, sizeof(item.animIdle), "");
+                kv.GetString("anim_walk", item.animWalk, sizeof(item.animWalk), "");
+                kv.GetString("anim_jump", item.animJump, sizeof(item.animJump), "");
+                item.heightType = kv.GetNum("height_type", 1);
+                item.heightCustom = kv.GetNum("height_custom", 0);
+                item.modelScale = kv.GetFloat("modelscale", 0.5);
             }
             
             list.PushArray(item);
@@ -843,7 +1215,9 @@ public void OnPluginEnd()
     delete g_TrailList;
     delete g_AuraList;
     delete g_ModelList;
-    delete g_EyeList;
+    delete g_SheenList;
+    delete g_KillstreakerList;
     delete g_DeathList;
     delete g_PetList;
+    delete g_SpawnList;
 }
