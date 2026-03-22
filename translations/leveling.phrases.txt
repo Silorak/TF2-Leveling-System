@@ -206,15 +206,47 @@
         "pt"        "{green}[Nivelamento]{default} Modelo equipado: {green}{1}"
     }
 
-    "Eye_Equipped"
+    "Sheen_Equipped"
     {
         "#format"   "{1:s}"
-        "en"        "{green}[Leveling]{default} Eye effect equipped: {green}{1}"
-        "es"        "{green}[Nivelación]{default} Efecto ocular equipado: {green}{1}"
-        "ru"        "{green}[Уровень]{default} Эффект глаз экипирован: {green}{1}"
-        "de"        "{green}[Leveling]{default} Augeneffekt ausgerüstet: {green}{1}"
-        "fr"        "{green}[Niveau]{default} Effet oculaire équipé: {green}{1}"
-        "pt"        "{green}[Nivelamento]{default} Efeito ocular equipado: {green}{1}"
+        "en"        "{green}[Leveling]{default} Sheen equipped: {green}{1}"
+        "es"        "{green}[Nivelación]{default} Brillo equipado: {green}{1}"
+        "ru"        "{green}[Уровень]{default} Блеск экипирован: {green}{1}"
+        "de"        "{green}[Leveling]{default} Glanz ausgerüstet: {green}{1}"
+        "fr"        "{green}[Niveau]{default} Éclat équipé: {green}{1}"
+        "pt"        "{green}[Nivelamento]{default} Brilho equipado: {green}{1}"
+    }
+
+    "Killstreaker_Equipped"
+    {
+        "#format"   "{1:s}"
+        "en"        "{green}[Leveling]{default} Killstreaker equipped: {green}{1}"
+        "es"        "{green}[Nivelación]{default} Racha de muertes equipada: {green}{1}"
+        "ru"        "{green}[Уровень]{default} Киллстрикер экипирован: {green}{1}"
+        "de"        "{green}[Leveling]{default} Killstreaker ausgerüstet: {green}{1}"
+        "fr"        "{green}[Niveau]{default} Killstreaker équipé: {green}{1}"
+        "pt"        "{green}[Nivelamento]{default} Killstreaker equipado: {green}{1}"
+    }
+
+    "Spawn_Equipped"
+    {
+        "#format"   "{1:s}"
+        "en"        "{green}[Leveling]{default} Spawn particle equipped: {green}{1}"
+        "es"        "{green}[Nivelación]{default} Partícula de aparición equipada: {green}{1}"
+        "ru"        "{green}[Уровень]{default} Эффект появления экипирован: {green}{1}"
+        "de"        "{green}[Leveling]{default} Spawn-Partikel ausgerüstet: {green}{1}"
+        "fr"        "{green}[Niveau]{default} Particule d'apparition équipée: {green}{1}"
+        "pt"        "{green}[Nivelamento]{default} Partícula de spawn equipada: {green}{1}"
+    }
+
+    "Cosmetics_Unequip"
+    {
+        "en"        "{green}[Leveling]{default} Unequipped."
+        "es"        "{green}[Nivelación]{default} Desequipado."
+        "ru"        "{green}[Уровень]{default} Снято."
+        "de"        "{green}[Leveling]{default} Abgelegt."
+        "fr"        "{green}[Niveau]{default} Déséquipé."
+        "pt"        "{green}[Nivelamento]{default} Desequipado."
     }
 
     "Death_Equipped"
