@@ -7,7 +7,7 @@
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Chat Tags"
-#define PLUGIN_VERSION "1.4.0"
+#define PLUGIN_VERSION "1.5.0"
 
 // chat-processor.inc defines MAXLENGTH_NAME as 128 and MAXLENGTH_BUFFER as 255.
 // Tags with multiple {#RRGGBB} codes (9 bytes each) can get large fast.
@@ -132,17 +132,7 @@ void RebuildCachedTag(int client)
     if (!IsClientInGame(client))
         return;
 
-    // Priority 1: VIP custom tag (!customtag)
-    char customTag[32];
-    Leveling_GetCustomTag(client, customTag, sizeof(customTag));
-
-    if (customTag[0] != '\0')
-    {
-        strcopy(g_CachedTag[client], TAG_MAX_LENGTH, customTag);
-        return;
-    }
-
-    // Priority 2: Manually equipped tag (!tags menu)
+    // Priority 1: Manually equipped tag from !tags menu (explicit choice overrides everything)
     char equipped[16];
     Leveling_GetEquipped(client, Cosmetic_Tag, equipped, sizeof(equipped));
 
@@ -170,6 +160,16 @@ void RebuildCachedTag(int client)
                 return;
             }
         }
+    }
+
+    // Priority 2: VIP custom tag (!customtag) — used when no explicit !tags selection
+    char customTag[32];
+    Leveling_GetCustomTag(client, customTag, sizeof(customTag));
+
+    if (customTag[0] != '\0')
+    {
+        strcopy(g_CachedTag[client], TAG_MAX_LENGTH, customTag);
+        return;
     }
 
     // Priority 3: Auto — highest unlocked tag
@@ -215,6 +215,19 @@ public Action Command_Tags(int client, int args)
 
     Menu menu = new Menu(TagMenuHandler);
     menu.SetTitle("Select Chat Tag (Level %d)", level);
+
+    // Show VIP custom tag option if player has one set
+    char customTag[32];
+    Leveling_GetCustomTag(client, customTag, sizeof(customTag));
+    if (customTag[0] != '\0')
+    {
+        char stripped[64];
+        StripColorTags(customTag, stripped, sizeof(stripped));
+        char display[128];
+        Format(display, sizeof(display), "★ VIP: %s", stripped);
+        menu.AddItem("custom", display);
+    }
+
     menu.AddItem("auto", "Auto (Highest Unlocked)");
 
     LevelTag entry;
@@ -260,10 +273,16 @@ public int TagMenuHandler(Menu menu, MenuAction action, int client, int slot)
         char info[16];
         menu.GetItem(slot, info, sizeof(info));
 
-        if (StrEqual(info, "auto"))
+        if (StrEqual(info, "custom"))
+        {
+            // Clear equipped tag so RebuildCachedTag uses Priority 1 (custom tag)
+            Leveling_SetEquipped(client, Cosmetic_Tag, "");
+            CPrintToChat(client, "%t", "Tag_CustomActive");
+        }
+        else if (StrEqual(info, "auto"))
         {
             Leveling_SetEquipped(client, Cosmetic_Tag, "");
-            CPrintToChat(client, "{green}[Leveling]{default} Tag set to auto (highest unlocked).");
+            CPrintToChat(client, "%t", "Tag_AutoSet");
         }
         else
         {
@@ -279,7 +298,7 @@ public int TagMenuHandler(Menu menu, MenuAction action, int client, int slot)
                 {
                     char stripped[64];
                     StripColorTags(entry.tag, stripped, sizeof(stripped));
-                    CPrintToChat(client, "{green}[Leveling]{default} Tag equipped: {green}%s", stripped);
+                    CPrintToChat(client, "%t", "Tag_Equipped", stripped);
                     break;
                 }
             }
