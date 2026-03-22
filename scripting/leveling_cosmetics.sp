@@ -1029,7 +1029,7 @@ public int Handler_CosmeticList(Menu menu, MenuAction action, int param1, int pa
                 case Cosmetic_Killstreaker: RemoveEyeEffects(param1);
                 case Cosmetic_Pet:   RemovePet(param1);
             }
-            CPrintToChat(param1, "{green}[Leveling]{default} Unequipped.");
+            CPrintToChat(param1, "%t", "Cosmetics_Unequip");
             OpenEquipMenu(param1);
             return 0;
         }
@@ -1059,13 +1059,13 @@ public int Handler_CosmeticList(Menu menu, MenuAction action, int param1, int pa
             {
                 RemoveEyeEffects(param1);
                 CreateEyeEffects(param1);
-                CPrintToChat(param1, "{green}[Leveling]{default} Sheen equipped: {green}%s", display);
+                CPrintToChat(param1, "%t", "Sheen_Equipped", display);
             }
             case Cosmetic_Killstreaker:
             {
                 RemoveEyeEffects(param1);
                 CreateEyeEffects(param1);
-                CPrintToChat(param1, "{green}[Leveling]{default} Killstreaker equipped: {green}%s", display);
+                CPrintToChat(param1, "%t", "Killstreaker_Equipped", display);
             }
             case Cosmetic_Death:
             {
@@ -1081,7 +1081,7 @@ public int Handler_CosmeticList(Menu menu, MenuAction action, int param1, int pa
             {
                 // Preview it immediately
                 CreateSpawnParticle(param1, value);
-                CPrintToChat(param1, "{green}[Leveling]{default} Spawn particle equipped: {green}%s", display);
+                CPrintToChat(param1, "%t", "Spawn_Equipped", display);
             }
         }
 
