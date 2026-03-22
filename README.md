@@ -2,7 +2,7 @@
 
 # TF2 Leveling System
 
-[![Version](https://img.shields.io/badge/version-1.3.2-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue?style=for-the-badge)](https://github.com/Silorak/TF2-Leveling-System/releases)
 [![SourceMod](https://img.shields.io/badge/SourceMod-1.12-orange?style=for-the-badge)](https://www.sourcemod.net/)
 [![License](https://img.shields.io/badge/license-GPL%20v3-green?style=for-the-badge)](LICENSE)
 
@@ -16,31 +16,42 @@ A modular XP and leveling system for TF2 servers with cosmetic rewards, chat tag
 
 ## Architecture
 
-A modular plugin suite built around a shared native API. Each plugin can be loaded or unloaded independently without affecting the others.
-
 | Plugin | File | Purpose |
 |--------|------|---------|
 | **Core** | `leveling_core.smx` | Database, XP/level logic, admin commands, all natives |
 | **Chat** | `leveling_chat.smx` | Chat tags with hex color support via Chat Processor |
-| **Cosmetics** | `leveling_cosmetics.smx` | Trails, auras, player models, eye effects, death effects, pets |
+| **Cosmetics** | `leveling_cosmetics.smx` | Trails, auras, models, sheens, killstreakers, death effects, pets, spawn particles |
 | **VIP** | `leveling_vip.smx` | Custom welcome messages and chat tags |
-| **Visuals** | `leveling_visuals.smx` | HUD progress bar (below speed HUD, toggleable with `!xphud`), floating XP, level-up effects |
+| **Visuals** | `leveling_visuals.smx` | HUD progress bar, floating XP, level-up effects |
 
-**Core is required.** The other four are optional — load whichever modules you need.
+**Core is required.** The other four are optional.
 
 ---
 
 ## Features
 
-**Leveling** — 50 levels with configurable exponential XP scaling. XP from kills, revenge bonuses, and a configurable donor multiplier. Auto-save with transaction batching. MySQL and SQLite both supported.
+**Leveling** — 50 levels with configurable exponential XP scaling. XP from kills (bots excluded), revenge bonuses, and a donor multiplier. Auto-save with transaction batching. MySQL and SQLite supported. Dead Ringer feign deaths filtered.
 
-**Chat Tags** — Level-based colored chat tags using `{#RRGGBB}` hex format with multi-color support (e.g. `{#FF0000}[{#00FF00}Tag{#FF0000}]`). Uses Chat Processor's native tag API (`ChatProcessor_AddClientTag`) for reliable rendering — no forward ordering conflicts. Optional per-tag `name_color` for coloring the player's name in chat. Players automatically get their highest unlocked tag, or can manually select any unlocked tag via `!tags`. VIPs can override with fully custom tags via `!customtag`.
+**Chat Tags** — Level-based colored tags using `{#RRGGBB}` hex format. Bots excluded. VIPs can set custom tags via `!customtag`.
 
-**Cosmetics** — Equip trails (sprite-based), auras (taunt unusual particle effects — full-body effects like Holy Grail, Hellish Inferno, Scorching Sensation visible to everyone including the owner), player models, eye effects (killstreak-style particles on eyeglow attachment points — no TF2Attributes dependency), death effects (gold/ice/ash/electro ragdoll flags or custom particles at death position), and pets (parented prop_dynamic at 50% scale). Particle auras use the proven entity creation order (Spawn → Parent → Activate → Start) from AlliedModders community best practices. Models use TF2's `SetCustomModel` + `m_bUseClassAnimations` pipeline for correct animations with automatic wearable hiding. All cosmetics are config-driven with optional admin flag restrictions.
+**Cosmetics** — Nine cosmetic types, all config-driven with per-item level gates and optional admin flag restrictions:
 
-**VIP** — Custom welcome messages with `{RAINBOW}` support and custom chat tags. Requires `ADMFLAG_RESERVATION`. Cooldown-protected, input-validated, persisted to database.
+| Type | Description |
+|------|-------------|
+| **Trails** | Sprite-based with configurable color, width, lifetime |
+| **Auras** | Taunt unusual particles (utaunt_*) at player feet |
+| **Models** | Player model overrides with automatic wearable hiding |
+| **Sheens** | Weapon sheen colors via TF2Attributes (7 colors) |
+| **Killstreakers** | Professional Killstreak eye effects via TF2Attributes (7 effects) |
+| **Death Effects** | Gold/ice/ash/electro ragdoll flags or custom particles |
+| **Pets** | Free-moving animated companions with idle/walk/jump states, configurable scale and height |
+| **Spawn Particles** | One-shot particle burst on each respawn |
 
-**Visuals** — HUD bar showing XP progress displayed just below the TFDB speed HUD (centered, green, single line). Can be toggled off per-player with `!xphud`. Floating "+XP" on kills, level-up effects (screen shake, gold flash, confetti particle).
+All cosmetics clean up on death (auras/trails fade to avoid decals), reapply on respawn. Per-type unequip in every submenu. Equipped items marked with ★.
+
+**VIP** — Custom welcome messages with `{RAINBOW}` support. Cooldown-protected, input-validated, persisted to database.
+
+**Visuals** — XP progress bar (toggleable with `!xphud`), floating "+XP" on kills, level-up effects (screen shake, gold flash, confetti).
 
 ---
 
@@ -49,8 +60,9 @@ A modular plugin suite built around a shared native API. Each plugin can be load
 ### Requirements
 
 - **SourceMod 1.12+**
-- **[Chat Processor](https://github.com/Drixevel/Chat-Processor)** — only if using `leveling_chat.smx`
-- **[Color Variables](https://github.com/KissLick/ColorVariables)** — `colorvariables.inc` in your include path
+- **[Chat Processor](https://github.com/Drixevel/Chat-Processor)** — for `leveling_chat.smx`
+- **[Color Variables](https://github.com/KissLick/ColorVariables)** — `colorvariables.inc`
+- **[TF2Attributes](https://github.com/FlaminSarge/tf2attributes)** — for Sheens/Killstreakers (soft dependency — plugin works without it)
 
 ### File Structure
 
@@ -61,296 +73,84 @@ addons/sourcemod/
 │   ├── leveling_chat.smx          ← optional
 │   ├── leveling_cosmetics.smx     ← optional
 │   ├── leveling_vip.smx           ← optional
-│   └── leveling_visuals.smx       ← optional
+│   ├── leveling_visuals.smx       ← optional
+│   └── tf2attributes.smx          ← optional
+├── gamedata/
+│   └── tf2.attributes.txt         ← for tf2attributes
 ├── configs/leveling/
 │   ├── core.cfg                   ← auto-created if missing
-│   ├── tags.cfg                   ← chat tags by level
-│   └── cosmetics.cfg              ← trails, auras, models
-├── configs/
-│   └── chat_processor.cfg         ← required for chat tags (from Chat Processor)
-├── translations/
-│   └── leveling.phrases.txt
-└── scripting/
-    ├── include/leveling.inc       ← public API
-    ├── leveling_core.sp
-    ├── leveling_chat.sp
-    ├── leveling_cosmetics.sp
-    ├── leveling_vip.sp
-    └── leveling_visuals.sp
+│   ├── tags.cfg                   ← chat tags
+│   └── cosmetics.cfg              ← all cosmetic items
+└── translations/
+    └── leveling.phrases.txt
 ```
 
 ### Compile Order
 
-Compile `leveling_core.sp` first, then the other four in any order. All subplugins soft-depend on core via `SharedPlugin`.
+Compile `leveling_core.sp` first, then the rest. **All plugins must be compiled together** with the same `leveling.inc`.
 
-### Database Setup
+### Database
 
-By default the plugin uses SQLite (`tf2_leveling.sq3`). For MySQL, add a `"leveling"` entry to `configs/databases.cfg`:
-
-```
-"leveling"
-{
-    "driver"    "mysql"
-    "host"      "localhost"
-    "database"  "tf2_server"
-    "user"      "your_user"
-    "pass"      "your_password"
-    "port"      "3306"
-}
-```
-
-The table `sm_leveling_users` is created automatically with schema versioning — no manual migration needed.
+Works out of the box with SQLite (no setup needed). For MySQL, add `"leveling"` to `databases.cfg`. Schema migrations are automatic.
 
 ---
 
 ## Configuration
 
-### Core Settings — `configs/leveling/core.cfg`
-
-```
-"LevelingCore"
-{
-    "base_xp"           "100"       // XP for level 1→2 (10 - 10000)
-    "xp_multiplier"     "1.15"      // Exponential scaling (0.1 - 5.0)
-    "kill_xp"           "10"        // XP per kill (1 - 1000)
-    "revenge_xp"        "50"        // Bonus for revenge kills (0 - 500)
-    "donor_multiplier"  "2"         // XP multiplier for donors (1 - 5)
-    "levelup_sound"     "ui/item_acquired.wav"
-}
-```
-
-**XP Formula:** `XP_needed = base_xp × (level ^ xp_multiplier)`
-
-At defaults: Level 1→2 needs 100 XP (10 kills). Level 25→26 needs ~762 XP. Level 49→50 needs ~2,511 XP. The plugin validates the formula won't overflow at max level on config load.
-
-### Chat Tags — `configs/leveling/tags.cfg`
-
-```
-"LevelingTags"
-{
-    "1"     "{#00FF00}[Newbie]"
-    "5"     "{#00BFFF}[Regular]"
-    "10"    "{#FFD700}[Veteran]"
-    "50"    "{#FF00FF}[Legend]"
-    "10"
-    {
-        "tag"          "{#FFD700}[{#FFFFFF}VIP Gold{#FFD700}]"
-        "name_color"   "{#FFD700}"
-        "flag"         "a"
-    }
-}
-```
-
-Tags support two formats: simple (`"level" "tag"`) for everyone, or subsection with optional `"name_color"` and `"flag"` for colored names and admin-restricted tags. Multi-color tags are supported (e.g. `{#FF0000}[{#00FF00}Tag{#FF0000}]`). Players see restricted tags as `(VIP Only)` in the `!tags` menu.
-
 ### Cosmetics — `configs/leveling/cosmetics.cfg`
 
-```
-"LevelingCosmetics"
-{
-    "Trails"
-    {
-        "Red Laser"
-        {
-            "level"      "2"
-            "material"   "materials/sprites/laser.vmt"
-            "color"      "255 0 0"        // optional, default "255 255 255"
-            "startwidth" "15.0"           // optional, default 20.0
-            "endwidth"   "1.0"            // optional, default 1.0
-            "lifetime"   "2.0"            // optional, default 2.0
-        }
-        "VIP Rainbow Trail"
-        {
-            "level"      "1"
-            "material"   "materials/sprites/laser.vmt"
-            "flag"       "a"              // VIP only (ADMFLAG_RESERVATION)
-        }
-    }
-    "Auras"
-    {
-        "Fire"
-        {
-            "level"     "4"
-            "effect"    "burningplayer_corpse"
-        }
-    }
-    "Models"
-    {
-        "Robot Heavy"
-        {
-            "level"     "5"
-            "model"     "models/bots/heavy/bot_heavy.mdl"
-        }
-    }
-}
-```
+| Section | Value Key | Format |
+|---------|-----------|--------|
+| Trails | `material` | VMT path + optional `color`, `startwidth`, `endwidth`, `lifetime` |
+| Auras | `effect` | TF2 particle name |
+| Models | `model` | MDL path |
+| Sheens | `sheen` | 1-7 |
+| Killstreakers | `effect` | 2002-2008 |
+| Deaths | `effect` | `gold`, `ice`, `ash`, `electro`, or particle name |
+| Pets | `model` | MDL path + optional `anim_idle`, `anim_walk`, `anim_jump`, `height_type`, `height_custom`, `modelscale` |
+| Spawns | `effect` | TF2 particle name |
 
-Items with `"flag"` are shown as `(VIP Only)` in the menu for players who don't have the required admin flag. Flag values: `"a"` = reservation (VIP/donor), `"b"` = generic, `"d"` = slay, `"z"` = root.
-
-### ConVars
-
-| ConVar | Default | Description |
-|--------|---------|-------------|
-| `sm_leveling_verbose` | `0` | Enable verbose logging (load/save/auto-save) |
-| `sm_leveling_autosave` | `300` | Auto-save interval in seconds (min 60) |
+All items support optional `"flag"` for admin restrictions (`"a"` = VIP, `"b"` = generic, `"z"` = root).
 
 ---
 
 ## Commands
 
-### Player
-
 | Command | Description |
 |---------|-------------|
-| `!level` / `sm_level` | Show your level, XP, kills, and playtime |
-| `!rank` / `sm_rank` | Top 10 leaderboard |
-| `!cosmetics` / `sm_equip` | Open cosmetics equip menu |
-| `!tags` / `sm_tags` | Select an unlocked chat tag |
-| `!xphud` / `sm_xphud` | Toggle XP progress bar on/off |
-
-### VIP (requires `ADMFLAG_RESERVATION`)
-
-| Command | Description |
-|---------|-------------|
-| `!welcomemsg <message>` | Set custom join message (`{RAINBOW}` supported) |
-| `!welcomemsg` | Clear custom welcome |
-| `!customtag <tag>` | Set custom chat tag |
-| `!customtag` | Clear custom tag, revert to level tag |
-
-60-second cooldown between changes. Input is validated (alphanumeric + basic punctuation only).
-
-### Admin
-
-| Command | Permission | Description |
-|---------|------------|-------------|
-| `sm_givexp <player> <amount>` | SLAY | Give XP (1 - 10,000) |
-| `sm_setlevel <player> <level>` | SLAY | Set level (1 - 50), resets XP to 0 |
-| `sm_resetlevel <player>` | ROOT | Full reset (level, XP, kills, playtime, cosmetics) |
-
-All admin commands are logged via `LogAction`.
+| `!level` | Show your level, XP, kills, playtime |
+| `!rank` | Top 10 leaderboard |
+| `!cosmetics` / `!equip` | Open cosmetics menu |
+| `!tags` / `!tag` | Select a chat tag |
+| `!xphud` | Toggle XP bar |
+| `!welcomemsg` | Set/clear VIP welcome message |
+| `!customtag` | Set/clear VIP chat tag |
+| `sm_givexp` | Give XP (admin) |
+| `sm_setlevel` | Set level (admin) |
+| `sm_resetlevel` | Full reset (admin) |
 
 ---
 
 ## Developer API
 
-Include `leveling.inc` in your plugin. Core registers 17 natives, 3 forwards, a `CosmeticType` enum, and a `LevelingPlayer` methodmap.
-
-### Enum
-
 ```sourcepawn
-enum CosmeticType
-{
-    Cosmetic_Trail = 0,
-    Cosmetic_Aura,
-    Cosmetic_Model,
-    Cosmetic_Tag,
-    Cosmetic_Eye,
-    Cosmetic_Death,
-    Cosmetic_Pet
-}
-```
-
-### Natives
-
-```sourcepawn
-// Read
-native int  Leveling_GetLevel(int client);
-native int  Leveling_GetXP(int client);
-native int  Leveling_GetTotalKills(int client);
-native int  Leveling_GetPlaytime(int client);           // seconds, includes current session
-native int  Leveling_GetXPForLevel(int level);           // -1 at max level
-native bool Leveling_IsDataLoaded(int client);
-native bool Leveling_HasLevel(int client, int required);
-
-// Write
-native void     Leveling_GiveXP(int client, int amount); // capped at 10,000 per call
-native void     Leveling_SetLevel(int client, int level); // does NOT fire OnLevelUp
-native void     Leveling_SavePlayer(int client);
-native Database Leveling_GetDatabase();
-
-// Cosmetic data (stored in core DB, typed with CosmeticType enum)
-native void Leveling_GetEquipped(int client, CosmeticType type, char[] buffer, int maxlen);
-native void Leveling_SetEquipped(int client, CosmeticType type, const char[] value);
-
-// VIP data (stored in core DB)
-native void Leveling_GetCustomWelcome(int client, char[] buffer, int maxlen);
-native void Leveling_SetCustomWelcome(int client, const char[] message);
-native void Leveling_GetCustomTag(int client, char[] buffer, int maxlen);
-native void Leveling_SetCustomTag(int client, const char[] tag);
-```
-
-### Forwards
-
-```sourcepawn
-// Fired when player data is loaded from DB. Wait for this before accessing data.
-forward void Leveling_OnDataLoaded(int client);
-
-// Fired on level up (not on SetLevel).
-forward void Leveling_OnLevelUp(int client, int newLevel);
-
-// Fired on XP gain. totalXP = XP after gain for current level.
-forward void Leveling_OnXPGain(int client, int amount, int totalXP);
-```
-
-### Methodmap
-
-```sourcepawn
-LevelingPlayer player = LevelingPlayer(client);
-
-player.Level;           // get/set
-player.XP;              // get
-player.TotalKills;      // get
-player.Playtime;        // get (seconds)
-player.IsLoaded;        // get
-player.GiveXP(100);
-player.HasLevel(10);
-```
-
-### Example Plugin
-
-```sourcepawn
-#include <sourcemod>
 #include <leveling>
 
-public void Leveling_OnLevelUp(int client, int newLevel)
-{
-    if (newLevel == 50)
-        PrintToChatAll("%N has reached max level!", client);
+enum CosmeticType {
+    Cosmetic_Trail, Cosmetic_Aura, Cosmetic_Model, Cosmetic_Tag,
+    Cosmetic_Sheen, Cosmetic_Killstreaker, Cosmetic_Death,
+    Cosmetic_Pet, Cosmetic_Spawn
 }
 
-public void Leveling_OnDataLoaded(int client)
-{
-    // Safe to read player data now
-    int level = Leveling_GetLevel(client);
-    PrintToServer("%N loaded at level %d", client, level);
+forward void Leveling_OnDataLoaded(int client);
+forward void Leveling_OnLevelUp(int client, int newLevel);
+forward void Leveling_OnXPGain(int client, int amount, int totalXP);
 
-    // Check equipped cosmetic using enum
-    char trail[64];
-    Leveling_GetEquipped(client, Cosmetic_Trail, trail, sizeof(trail));
-    if (trail[0] != '\0')
-        PrintToServer("%N has trail: %s", client, trail);
-}
+LevelingPlayer player = LevelingPlayer(client);
+player.Level;   player.XP;   player.GiveXP(100);   player.HasLevel(10);
 ```
 
----
-
-## Translations
-
-Supported: English, Spanish, Russian, German, French, Portuguese.
-
-To add a language, edit `translations/leveling.phrases.txt` and add your language code under each phrase block.
-
----
-
-## Troubleshooting
-
-**Cosmetics not working** — Check that model/material paths exist on the server. Look for `"Model not precached"` errors in the server console. Auras and models only apply to alive players.
-
-**Chat tags not showing** — Make sure `chat-processor.smx` is loaded and `configs/chat_processor.cfg` exists on the server (this file defines TF2's message format strings — without it, Chat Processor skips all chat processing silently). Check that `leveling_chat.smx` is loaded after `leveling_core.smx` and that `tags.cfg` exists and is valid KeyValues.
-
-**Database errors** — If MySQL fails (wrong socket, bad credentials, server down), the plugin automatically falls back to SQLite. You will see `[Leveling] Falling back to local SQLite database.` in logs — this is normal and the plugin keeps working. If you see errors from `admin-sql-threaded.smx` about MySQL sockets, that's SourceMod's built-in admin plugin, not the leveling system — check your `databases.cfg` `"default"` section. No database setup is required to use this plugin — it works out of the box with SQLite.
-
-**Players T-posing with models** — Make sure you are running `leveling_cosmetics.smx`. It uses the correct `SetCustomModel` + `m_bUseClassAnimations` pipeline.
+17 natives, 3 forwards, methodmap. See `leveling.inc` for full documentation.
 
 ---
 
@@ -358,16 +158,9 @@ To add a language, edit `translations/leveling.phrases.txt` and add your languag
 
 - **Author:** [Silorak](https://github.com/Silorak)
 - **[Chat Processor](https://github.com/Drixevel/Chat-Processor)** by Drixevel
-- **[Color Variables](https://github.com/KissLick/ColorVariables)** by KissLick / Drixevel
-
----
+- **[Color Variables](https://github.com/KissLick/ColorVariables)** by KissLick
+- **[TF2Attributes](https://github.com/FlaminSarge/tf2attributes)** by FlaminSarge
 
 ## License
 
 GPL v3.0 — see [LICENSE](LICENSE).
-
-<div align="center">
-
-[Report Bug](https://github.com/Silorak/TF2-Leveling-System/issues) · [Request Feature](https://github.com/Silorak/TF2-Leveling-System/issues)
-
-</div>
