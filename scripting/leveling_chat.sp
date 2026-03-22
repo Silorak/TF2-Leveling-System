@@ -132,17 +132,7 @@ void RebuildCachedTag(int client)
     if (!IsClientInGame(client))
         return;
 
-    // Priority 1: VIP custom tag (!customtag)
-    char customTag[32];
-    Leveling_GetCustomTag(client, customTag, sizeof(customTag));
-
-    if (customTag[0] != '\0')
-    {
-        strcopy(g_CachedTag[client], TAG_MAX_LENGTH, customTag);
-        return;
-    }
-
-    // Priority 2: Manually equipped tag (!tags menu)
+    // Priority 1: Manually equipped tag from !tags menu (explicit choice overrides everything)
     char equipped[16];
     Leveling_GetEquipped(client, Cosmetic_Tag, equipped, sizeof(equipped));
 
@@ -170,6 +160,16 @@ void RebuildCachedTag(int client)
                 return;
             }
         }
+    }
+
+    // Priority 2: VIP custom tag (!customtag) — used when no explicit !tags selection
+    char customTag[32];
+    Leveling_GetCustomTag(client, customTag, sizeof(customTag));
+
+    if (customTag[0] != '\0')
+    {
+        strcopy(g_CachedTag[client], TAG_MAX_LENGTH, customTag);
+        return;
     }
 
     // Priority 3: Auto — highest unlocked tag

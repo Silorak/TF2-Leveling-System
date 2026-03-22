@@ -1,4 +1,4 @@
-// TF2 Leveling System - Pet Follower VScript v1.6.0
+// TF2 Leveling System - Pet Follower VScript v1.5.0
 // base_boss entity with MOVETYPE_NOCLIP for universal map support.
 // XY: SetAbsVelocity drives smooth horizontal movement.
 // Z:  SetAbsOrigin pins pet to owner's Z + hover/jump offset each tick.
