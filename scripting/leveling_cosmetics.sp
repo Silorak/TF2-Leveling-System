@@ -7,13 +7,14 @@
 #include <tf2_stocks>
 #include <colorvariables>
 #include <leveling>
+#include <clientprefs>
 
 #undef REQUIRE_PLUGIN
 #include <tf2attributes>
 #define REQUIRE_PLUGIN
 
 #define PLUGIN_NAME    "[Leveling] Cosmetics"
-#define PLUGIN_VERSION "1.4.0"
+#define PLUGIN_VERSION "1.5.0"
 
 public Plugin myinfo =
 {
@@ -24,26 +25,54 @@ public Plugin myinfo =
     url         = "https://github.com/Silorak/TF2-Leveling-System"
 };
 
+// Base cosmetic item — shared by all types. Kept lean (~250 bytes).
 enum struct CosmeticItem
 {
     char name[64];
     char value[128];
     int level;
-    int flag; // Admin flag required (0 = none, available to all)
-    
-    // Optional properties for trails
+    int flag;
+
+    // Trail-specific
     char color[32];
     float startwidth;
     float endwidth;
     float lifetime;
+}
 
-    // Optional properties for pets (from SourcePets approach)
+// Pet-specific extended data — stored in parallel ArrayList, same index as g_PetList.
+// Separated to avoid bloating every Trail/Aura/Sheen with unused sound buffers.
+#define PET_SOUND_PATH_LEN 128
+#define PET_MAX_IDLE_SOUNDS 10
+
+enum struct PetData
+{
+    char desc[128];
     char animIdle[64];
     char animWalk[64];
     char animJump[64];
-    int heightType;       // 1=ground, 2=hover
-    int heightCustom;     // offset when hover
+    int heightType;
+    int heightCustom;
     float modelScale;
+
+    char soundIdle0[PET_SOUND_PATH_LEN];
+    char soundIdle1[PET_SOUND_PATH_LEN];
+    char soundIdle2[PET_SOUND_PATH_LEN];
+    char soundIdle3[PET_SOUND_PATH_LEN];
+    char soundIdle4[PET_SOUND_PATH_LEN];
+    char soundIdle5[PET_SOUND_PATH_LEN];
+    char soundIdle6[PET_SOUND_PATH_LEN];
+    char soundIdle7[PET_SOUND_PATH_LEN];
+    char soundIdle8[PET_SOUND_PATH_LEN];
+    char soundIdle9[PET_SOUND_PATH_LEN];
+    char soundJump[PET_SOUND_PATH_LEN];
+    char soundWalk[PET_SOUND_PATH_LEN];
+    int soundIdleCount;
+    int pitch;
+    float volume;     // 0.0-1.0, controls overall pet sound volume (default 0.5)
+    int skin;
+    int skins;
+    bool canBeColored;
 }
 
 ArrayList g_TrailList;
@@ -53,21 +82,38 @@ ArrayList g_SheenList;
 ArrayList g_KillstreakerList;
 ArrayList g_DeathList;
 ArrayList g_PetList;
+ArrayList g_PetDataList;  // Parallel to g_PetList — PetData structs
 ArrayList g_SpawnList;
 
 int  g_TrailEntity[MAXPLAYERS + 1] = { INVALID_ENT_REFERENCE, ... };
 int  g_AuraEntity[MAXPLAYERS + 1]  = { INVALID_ENT_REFERENCE, ... };
 int  g_PetEntity[MAXPLAYERS + 1]   = { INVALID_ENT_REFERENCE, ... };
-int  g_PetState[MAXPLAYERS + 1];    // 0=none, 1=idle, 2=walking, 3=jumping
+PetState g_PetState[MAXPLAYERS + 1];    // 0=none, 1=idle, 2=walking, 3=jumping
 int  g_PetType[MAXPLAYERS + 1] = { -1, ... }; // index into g_PetList
+int  g_PetColor[MAXPLAYERS + 1][3]; // RGB color per player (default 255,255,255)
 bool g_HasCustomModel[MAXPLAYERS + 1];
 bool g_HasKillstreak[MAXPLAYERS + 1];
 bool g_TF2AttribAvailable;
+Cookie g_PetColorCookie;
+ConVar g_cvPetDebug;
 
-#define PET_STATE_NONE    0
-#define PET_STATE_IDLE    1
-#define PET_STATE_WALKING 2
-#define PET_STATE_JUMPING 3
+enum PetState
+{
+    PetState_None = 0,
+    PetState_Idle,
+    PetState_Walking,
+    PetState_Jumping
+};
+
+// Preset pet colors
+char g_PetColorNames[][] = {
+    "White", "Red", "Blue", "Green", "Yellow",
+    "Purple", "Orange", "Pink", "Cyan", "Gold"
+};
+int g_PetColorValues[][3] = {
+    {255, 255, 255}, {255, 50, 50},   {50, 100, 255}, {50, 255, 50},   {255, 255, 50},
+    {180, 50, 255},  {255, 150, 30},  {255, 100, 180}, {50, 255, 255}, {255, 215, 0}
+};
 
 public void OnPluginStart()
 {
@@ -78,12 +124,25 @@ public void OnPluginStart()
     g_KillstreakerList = new ArrayList(sizeof(CosmeticItem));
     g_DeathList = new ArrayList(sizeof(CosmeticItem));
     g_PetList   = new ArrayList(sizeof(CosmeticItem));
+    g_PetDataList = new ArrayList(sizeof(PetData));
     g_SpawnList = new ArrayList(sizeof(CosmeticItem));
 
     LoadTranslations("leveling.phrases");
 
     RegConsoleCmd("sm_cosmetics", Command_Cosmetics, "Open cosmetics menu");
     RegConsoleCmd("sm_equip",     Command_Cosmetics, "Open cosmetics menu");
+    RegConsoleCmd("sm_petcolor",  Command_PetColor,  "Set pet color (!petcolor or !petcolor R G B)");
+
+    g_PetColorCookie = new Cookie("leveling_pet_color", "Pet color RGB", CookieAccess_Protected);
+    g_cvPetDebug = CreateConVar("sm_leveling_pet_debug", "0", "Print pet sequence and sound debug info to server console on spawn", FCVAR_NONE, true, 0.0, true, 1.0);
+
+    // Initialize default pet colors to white
+    for (int i = 0; i <= MAXPLAYERS; i++)
+    {
+        g_PetColor[i][0] = 255;
+        g_PetColor[i][1] = 255;
+        g_PetColor[i][2] = 255;
+    }
 
     HookEvent("player_spawn", Event_PlayerSpawn);
     HookEvent("player_death", Event_PlayerDeath);
@@ -140,13 +199,35 @@ public void OnMapStart()
     PrecacheCosmetics();
 }
 
+public void OnClientCookiesCached(int client)
+{
+    if (IsFakeClient(client)) return;
+
+    char buffer[16];
+    g_PetColorCookie.Get(client, buffer, sizeof(buffer));
+    if (buffer[0] != '\0')
+    {
+        char parts[3][8];
+        if (ExplodeString(buffer, " ", parts, 3, 8) == 3)
+        {
+            g_PetColor[client][0] = ClampInt(StringToInt(parts[0]), 0, 255);
+            g_PetColor[client][1] = ClampInt(StringToInt(parts[1]), 0, 255);
+            g_PetColor[client][2] = ClampInt(StringToInt(parts[2]), 0, 255);
+        }
+    }
+}
+
 public void OnClientDisconnect(int client)
 {
     RemoveAllCosmetics(client);
     g_HasCustomModel[client] = false;
     g_HasKillstreak[client] = false;
-    g_PetState[client] = PET_STATE_NONE;
+    g_PetState[client] = PetState_None;
     g_PetType[client] = -1;
+    // Pet color persists via cookie — just reset in-memory to default
+    g_PetColor[client][0] = 255;
+    g_PetColor[client][1] = 255;
+    g_PetColor[client][2] = 255;
 }
 
 void RemoveAllCosmetics(int client)
@@ -589,8 +670,12 @@ void SpawnTempParticle(float pos[3], const char[] particleName, float duration)
 }
 
 // ============================================================================
-// PET (free-moving prop_dynamic with PreThink AI — SourcePets approach)
+// PET (base_boss + VScript per-tick think for engine-interpolated movement)
 // ============================================================================
+// Uses TF2's base_boss entity (NextBot) with a VScript think function.
+// The VScript handles all movement, facing, and animation per-tick inside
+// the engine, giving NPC-quality smooth client-side interpolation.
+// SM just spawns/kills the entity and sets the owner.
 
 void CreatePet(int client, const char[] modelPath)
 {
@@ -602,7 +687,7 @@ void CreatePet(int client, const char[] modelPath)
         return;
     }
 
-    // Find the pet config entry so we can use its animations/height/scale
+    // Find config entry for this pet
     int petIndex = -1;
     for (int i = 0; i < g_PetList.Length; i++)
     {
@@ -615,51 +700,186 @@ void CreatePet(int client, const char[] modelPath)
         }
     }
 
-    int pet = CreateEntityByName("prop_dynamic_override");
-    if (!IsValidEntity(pet)) return;
+    // Get config values from PetData
+    float scale = 0.5;
+    int heightType = 1;
+    int heightCustom = 0;
+    int skinIndex = 0;
+    if (petIndex >= 0 && petIndex < g_PetDataList.Length)
+    {
+        PetData pd;
+        g_PetDataList.GetArray(petIndex, pd);
+        if (pd.modelScale > 0.0)
+            scale = pd.modelScale;
+        heightType = pd.heightType;
+        heightCustom = pd.heightCustom;
+        skinIndex = pd.skin;
+    }
 
-    DispatchKeyValue(pet, "targetname", "leveling_pet");
-    SetEntityModel(pet, modelPath);
-    DispatchKeyValue(pet, "solid", "0");
-    DispatchSpawn(pet);
-    ActivateEntity(pet);
-
-    // Position near owner with random offset
+    // Spawn position near owner
     float pos[3];
     GetClientAbsOrigin(client, pos);
     pos[0] += GetRandomFloat(-64.0, 64.0);
     pos[1] += GetRandomFloat(-64.0, 64.0);
-    TeleportEntity(pet, pos, NULL_VECTOR, NULL_VECTOR);
 
-    // Apply model scale from config (default 0.5)
-    float scale = 0.5;
-    if (petIndex >= 0)
-    {
-        CosmeticItem item;
-        g_PetList.GetArray(petIndex, item);
-        if (item.modelScale > 0.0)
-            scale = item.modelScale;
-    }
-    SetEntPropFloat(pet, Prop_Send, "m_flModelScale", scale);
+    // Create base_boss (TF2's built-in NextBot entity)
+    int pet = CreateEntityByName("base_boss");
+    if (!IsValidEntity(pet)) return;
 
-    // Start idle animation
-    if (petIndex >= 0)
+    char scaleStr[16];
+    FloatToString(scale, scaleStr, sizeof(scaleStr));
+
+    DispatchKeyValueVector(pet, "origin", pos);
+    DispatchKeyValue(pet, "model", modelPath);
+    DispatchKeyValue(pet, "modelscale", scaleStr);
+    DispatchKeyValue(pet, "health", "99999");
+    DispatchKeyValue(pet, "playbackrate", "1.0");
+    DispatchSpawn(pet);
+
+    // Configure: no damage, no player collision, not targetable
+    SetEntProp(pet, Prop_Data, "m_takedamage", 0);
+    SetEntProp(pet, Prop_Data, "m_lifeState", 0);
+    SetEntProp(pet, Prop_Data, "m_bloodColor", -1);
+    SetEntityFlags(pet, FL_NOTARGET);
+
+    // Disable player collision resolution (offset from m_lastHealthPercentage + 28)
+    int resolveOffset = FindSendPropInfo("CTFBaseBoss", "m_lastHealthPercentage") + 28;
+    if (resolveOffset > 28)
+        SetEntData(pet, resolveOffset, 0, 4, true);
+
+    // Small collision hull so it doesn't block players
+    float mins[3] = { -6.0, -6.0, 0.0 };
+    float maxs[3] = { 6.0, 6.0, 24.0 };
+    SetEntPropVector(pet, Prop_Send, "m_vecMins", mins);
+    SetEntPropVector(pet, Prop_Data, "m_vecMins", mins);
+    SetEntPropVector(pet, Prop_Send, "m_vecMaxs", maxs);
+    SetEntPropVector(pet, Prop_Data, "m_vecMaxs", maxs);
+
+    SetEntProp(pet, Prop_Data, "m_nSolidType", 0);
+    ActivateEntity(pet);
+
+    // Set skin
+    if (skinIndex > 0)
+        SetEntProp(pet, Prop_Send, "m_nSkin", skinIndex);
+
+    // Set owner — VScript reads this to know who to follow
+    SetEntPropEnt(pet, Prop_Send, "m_hOwnerEntity", client);
+
+    // Set height offset via VScript scope variable
+    float heightOff = (heightType == 2 && heightCustom > 0) ? float(heightCustom) : 0.0;
+    char vscriptInit[512];
+    Format(vscriptInit, sizeof(vscriptInit), "height_offset <- %.1f", heightOff);
+    SetVariantString(vscriptInit);
+    AcceptEntityInput(pet, "RunScriptCode");
+
+    // Pass sound + animation data to VScript from PetData
+    if (petIndex >= 0 && petIndex < g_PetDataList.Length)
     {
-        CosmeticItem item;
-        g_PetList.GetArray(petIndex, item);
-        if (item.animIdle[0] != '\0')
+        PetData pd;
+        g_PetDataList.GetArray(petIndex, pd);
+
+        // Build idle sounds array for VScript
+        char soundList[2048];
+        strcopy(soundList, sizeof(soundList), "sound_idle_list <- [");
+        bool firstSound = true;
+        char idleSounds[PET_MAX_IDLE_SOUNDS][PET_SOUND_PATH_LEN];
+        strcopy(idleSounds[0], PET_SOUND_PATH_LEN, pd.soundIdle0);
+        strcopy(idleSounds[1], PET_SOUND_PATH_LEN, pd.soundIdle1);
+        strcopy(idleSounds[2], PET_SOUND_PATH_LEN, pd.soundIdle2);
+        strcopy(idleSounds[3], PET_SOUND_PATH_LEN, pd.soundIdle3);
+        strcopy(idleSounds[4], PET_SOUND_PATH_LEN, pd.soundIdle4);
+        strcopy(idleSounds[5], PET_SOUND_PATH_LEN, pd.soundIdle5);
+        strcopy(idleSounds[6], PET_SOUND_PATH_LEN, pd.soundIdle6);
+        strcopy(idleSounds[7], PET_SOUND_PATH_LEN, pd.soundIdle7);
+        strcopy(idleSounds[8], PET_SOUND_PATH_LEN, pd.soundIdle8);
+        strcopy(idleSounds[9], PET_SOUND_PATH_LEN, pd.soundIdle9);
+        for (int s = 0; s < pd.soundIdleCount; s++)
         {
-            SetVariantString(item.animIdle);
-            AcceptEntityInput(pet, "SetAnimation");
+            if (idleSounds[s][0] == '\0') continue;
+            if (!firstSound) StrCat(soundList, sizeof(soundList), ",");
+            char escaped[PET_SOUND_PATH_LEN + 4];
+            Format(escaped, sizeof(escaped), "\"%s\"", idleSounds[s]);
+            StrCat(soundList, sizeof(soundList), escaped);
+            firstSound = false;
+        }
+        StrCat(soundList, sizeof(soundList), "]");
+        SetVariantString(soundList);
+        AcceptEntityInput(pet, "RunScriptCode");
+
+        if (pd.soundJump[0] != '\0')
+        {
+            Format(vscriptInit, sizeof(vscriptInit), "sound_jump <- \"%s\"", pd.soundJump);
+            SetVariantString(vscriptInit);
+            AcceptEntityInput(pet, "RunScriptCode");
+        }
+
+        if (pd.soundWalk[0] != '\0')
+        {
+            Format(vscriptInit, sizeof(vscriptInit), "sound_walk <- \"%s\"", pd.soundWalk);
+            SetVariantString(vscriptInit);
+            AcceptEntityInput(pet, "RunScriptCode");
+        }
+
+        Format(vscriptInit, sizeof(vscriptInit), "sound_pitch <- %d", pd.pitch > 0 ? pd.pitch : 100);
+        SetVariantString(vscriptInit);
+        AcceptEntityInput(pet, "RunScriptCode");
+
+        // Volume (0.0-1.0, clamped)
+        float vol = pd.volume;
+        if (vol <= 0.0) vol = 0.5;
+        if (vol > 1.0) vol = 1.0;
+        Format(vscriptInit, sizeof(vscriptInit), "sound_volume <- %.2f", vol);
+        SetVariantString(vscriptInit);
+        AcceptEntityInput(pet, "RunScriptCode");
+    }
+
+    // Pass debug flag from ConVar
+    Format(vscriptInit, sizeof(vscriptInit), "pet_debug <- %d", g_cvPetDebug.IntValue);
+    SetVariantString(vscriptInit);
+    AcceptEntityInput(pet, "RunScriptCode");
+
+    // Load the pet follower VScript — this calls PetInit() which sets up AddThinkToEnt
+    SetVariantString("leveling/pet_follower");
+    AcceptEntityInput(pet, "RunScriptFile");
+
+    // Override animation sequences from PetData
+    if (petIndex >= 0 && petIndex < g_PetDataList.Length)
+    {
+        PetData pd;
+        g_PetDataList.GetArray(petIndex, pd);
+
+        if (pd.animIdle[0] != '\0')
+        {
+            Format(vscriptInit, sizeof(vscriptInit),
+                "local s = self.LookupSequence(`%s`); if (s >= 0) seq_idle <- s;", pd.animIdle);
+            SetVariantString(vscriptInit);
+            AcceptEntityInput(pet, "RunScriptCode");
+        }
+        if (pd.animWalk[0] != '\0')
+        {
+            Format(vscriptInit, sizeof(vscriptInit),
+                "local s = self.LookupSequence(`%s`); if (s >= 0) seq_walk <- s;", pd.animWalk);
+            SetVariantString(vscriptInit);
+            AcceptEntityInput(pet, "RunScriptCode");
+        }
+        if (pd.animJump[0] != '\0')
+        {
+            Format(vscriptInit, sizeof(vscriptInit),
+                "local s = self.LookupSequence(`%s`); if (s >= 0) seq_jump <- s;", pd.animJump);
+            SetVariantString(vscriptInit);
+            AcceptEntityInput(pet, "RunScriptCode");
+        }
+
+        if (pd.canBeColored)
+        {
+            SetEntityRenderMode(pet, RENDER_TRANSCOLOR);
+            SetEntityRenderColor(pet, g_PetColor[client][0], g_PetColor[client][1], g_PetColor[client][2], 255);
         }
     }
 
     g_PetEntity[client] = EntIndexToEntRef(pet);
     g_PetType[client] = petIndex;
-    g_PetState[client] = PET_STATE_IDLE;
-
-    // Hook PreThink to drive pet movement every tick
-    SDKHook(client, SDKHook_PreThink, Hook_PetThink);
+    g_PetState[client] = PetState_Idle;
 }
 
 void RemovePet(int client)
@@ -668,146 +888,16 @@ void RemovePet(int client)
     {
         int entity = EntRefToEntIndex(g_PetEntity[client]);
         if (entity != -1 && IsValidEntity(entity))
+        {
+            // Stop all sounds before killing — prevents sounds lingering at death position
+            SetVariantString("StopAllPetSounds()");
+            AcceptEntityInput(entity, "RunScriptCode");
             AcceptEntityInput(entity, "Kill");
+        }
     }
     g_PetEntity[client] = INVALID_ENT_REFERENCE;
-    g_PetState[client] = PET_STATE_NONE;
+    g_PetState[client] = PetState_None;
     g_PetType[client] = -1;
-    SDKUnhook(client, SDKHook_PreThink, Hook_PetThink);
-}
-
-void SetPetAnimation(int client, const char[] anim)
-{
-    int entity = EntRefToEntIndex(g_PetEntity[client]);
-    if (entity == -1 || !IsValidEntity(entity)) return;
-    SetVariantString(anim);
-    AcceptEntityInput(entity, "SetAnimation");
-}
-
-void SetPetState(int client, int state)
-{
-    if (g_PetState[client] == state) return;
-    g_PetState[client] = state;
-
-    if (g_PetType[client] < 0) return;
-
-    CosmeticItem item;
-    g_PetList.GetArray(g_PetType[client], item);
-
-    switch (state)
-    {
-        case PET_STATE_IDLE:
-        {
-            if (item.animIdle[0] != '\0')
-                SetPetAnimation(client, item.animIdle);
-        }
-        case PET_STATE_WALKING:
-        {
-            if (item.animWalk[0] != '\0')
-                SetPetAnimation(client, item.animWalk);
-        }
-        case PET_STATE_JUMPING:
-        {
-            if (item.animJump[0] != '\0')
-                SetPetAnimation(client, item.animJump);
-        }
-    }
-}
-
-public void Hook_PetThink(int client)
-{
-    if (!IsClientInGame(client) || !IsPlayerAlive(client))
-    {
-        RemovePet(client);
-        return;
-    }
-
-    int petEnt = EntRefToEntIndex(g_PetEntity[client]);
-    if (petEnt == -1 || !IsValidEntity(petEnt))
-    {
-        SDKUnhook(client, SDKHook_PreThink, Hook_PetThink);
-        g_PetEntity[client] = INVALID_ENT_REFERENCE;
-        g_PetState[client] = PET_STATE_NONE;
-        g_PetType[client] = -1;
-        return;
-    }
-
-    // Hide pet while player is cloaked or disguised
-    if (TF2_IsPlayerInCondition(client, TFCond_Cloaked) || TF2_IsPlayerInCondition(client, TFCond_Disguised))
-        return;
-
-    float petPos[3], petAng[3], clientPos[3];
-    GetEntPropVector(petEnt, Prop_Data, "m_vecOrigin", petPos);
-    GetEntPropVector(petEnt, Prop_Data, "m_angRotation", petAng);
-    GetClientAbsOrigin(client, clientPos);
-
-    // Target height
-    float targetZ = clientPos[2];
-    if (g_PetType[client] >= 0)
-    {
-        CosmeticItem item;
-        g_PetList.GetArray(g_PetType[client], item);
-        if (item.heightType == 2 && item.heightCustom > 0)
-            targetZ = clientPos[2] + float(item.heightCustom);
-    }
-
-    float dist = GetVectorDistance(clientPos, petPos);
-
-    // Emergency teleport if too far
-    if (dist > 1024.0)
-    {
-        float newPos[3];
-        newPos[0] = clientPos[0] + GetRandomFloat(-64.0, 64.0);
-        newPos[1] = clientPos[1] + GetRandomFloat(-64.0, 64.0);
-        newPos[2] = targetZ;
-        TeleportEntity(petEnt, newPos, NULL_VECTOR, NULL_VECTOR);
-        return;
-    }
-
-    // Smooth exponential lerp toward owner position.
-    // Position-based teleport — proven SourcePets approach.
-    float deadzone = 40.0;
-    float speed = (dist - deadzone) / 54.0;
-    if (speed < -4.0) speed = -4.0;
-    if (speed > 4.0) speed = 4.0;
-    if (FloatAbs(speed) < 0.3)
-        speed *= 0.1;
-
-    if (dist > deadzone)
-    {
-        if (petPos[0] < clientPos[0]) petPos[0] += speed;
-        if (petPos[0] > clientPos[0]) petPos[0] -= speed;
-        if (petPos[1] < clientPos[1]) petPos[1] += speed;
-        if (petPos[1] > clientPos[1]) petPos[1] -= speed;
-    }
-
-    // Z lerp — smooth toward target height
-    petPos[2] += (targetZ - petPos[2]) * 0.08;
-
-    // Animation states
-    if (!(GetEntityFlags(client) & FL_ONGROUND))
-        SetPetState(client, PET_STATE_JUMPING);
-    else if (FloatAbs(speed) > 0.2)
-        SetPetState(client, PET_STATE_WALKING);
-    else
-        SetPetState(client, PET_STATE_IDLE);
-
-    // Smooth yaw toward owner
-    if (dist > 32.0)
-    {
-        float distX = clientPos[0] - petPos[0];
-        float distY = clientPos[1] - petPos[1];
-        float targetYaw = (ArcTangent2(distY, distX) * 180.0) / 3.14159;
-        float currentYaw = petAng[1];
-
-        float diff = targetYaw - currentYaw;
-        while (diff > 180.0) diff -= 360.0;
-        while (diff < -180.0) diff += 360.0;
-
-        petAng[1] = currentYaw + diff * 0.1;
-    }
-
-    TeleportEntity(petEnt, petPos, petAng, NULL_VECTOR);
 }
 
 // ============================================================================
@@ -841,6 +931,17 @@ void FadeKillEntRef(int ref)
 }
 
 // ============================================================================
+// UTILITY
+// ============================================================================
+
+int ClampInt(int value, int min, int max)
+{
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+}
+
+// ============================================================================
 // MENUS
 // ============================================================================
 
@@ -856,29 +957,149 @@ public Action Command_Cosmetics(int client, int args)
     return Plugin_Handled;
 }
 
+public Action Command_PetColor(int client, int args)
+{
+    if (client == 0) return Plugin_Handled;
+
+    // Check if player has a pet equipped
+    if (g_PetEntity[client] == INVALID_ENT_REFERENCE)
+    {
+        CPrintToChat(client, "%t", "PetColor_NoPet");
+        return Plugin_Handled;
+    }
+
+    // Check if the pet supports coloring
+    if (g_PetType[client] >= 0 && g_PetType[client] < g_PetDataList.Length)
+    {
+        PetData pd;
+        g_PetDataList.GetArray(g_PetType[client], pd);
+        if (!pd.canBeColored)
+        {
+            CPrintToChat(client, "%t", "PetColor_NotColorable");
+            return Plugin_Handled;
+        }
+    }
+
+    // If args = 3, treat as RGB input: !petcolor R G B
+    if (args == 3)
+    {
+        char rStr[8], gStr[8], bStr[8];
+        GetCmdArg(1, rStr, sizeof(rStr));
+        GetCmdArg(2, gStr, sizeof(gStr));
+        GetCmdArg(3, bStr, sizeof(bStr));
+
+        int r = StringToInt(rStr);
+        int g = StringToInt(gStr);
+        int b = StringToInt(bStr);
+
+        // Clamp 0-255
+        if (r < 0) r = 0; if (r > 255) r = 255;
+        if (g < 0) g = 0; if (g > 255) g = 255;
+        if (b < 0) b = 0; if (b > 255) b = 255;
+
+        ApplyPetColor(client, r, g, b);
+        CPrintToChat(client, "%t", "PetColor_SetRGB", r, g, b);
+        return Plugin_Handled;
+    }
+
+    // Otherwise show preset color menu
+    Menu menu = new Menu(Handler_PetColor);
+    menu.SetTitle("═══ Pet Color ═══\n  Current: %d %d %d\n  Or use: !petcolor R G B\n ",
+        g_PetColor[client][0], g_PetColor[client][1], g_PetColor[client][2]);
+
+    for (int i = 0; i < sizeof(g_PetColorNames); i++)
+    {
+        char info[8];
+        IntToString(i, info, sizeof(info));
+        menu.AddItem(info, g_PetColorNames[i]);
+    }
+
+    menu.ExitBackButton = true;
+    menu.Display(client, MENU_TIME_FOREVER);
+    return Plugin_Handled;
+}
+
+public int Handler_PetColor(Menu menu, MenuAction action, int param1, int param2)
+{
+    if (action == MenuAction_Select)
+    {
+        char info[8];
+        menu.GetItem(param2, info, sizeof(info));
+        int idx = StringToInt(info);
+
+        if (idx >= 0 && idx < sizeof(g_PetColorNames))
+        {
+            ApplyPetColor(param1, g_PetColorValues[idx][0], g_PetColorValues[idx][1], g_PetColorValues[idx][2]);
+            CPrintToChat(param1, "%t", "PetColor_SetPreset", g_PetColorNames[idx]);
+        }
+    }
+    else if (action == MenuAction_End) delete menu;
+    return 0;
+}
+
+void ApplyPetColor(int client, int r, int g, int b)
+{
+    g_PetColor[client][0] = r;
+    g_PetColor[client][1] = g;
+    g_PetColor[client][2] = b;
+
+    // Persist to cookie
+    char colorStr[16];
+    Format(colorStr, sizeof(colorStr), "%d %d %d", r, g, b);
+    g_PetColorCookie.Set(client, colorStr);
+
+    int entity = EntRefToEntIndex(g_PetEntity[client]);
+    if (entity != -1 && IsValidEntity(entity))
+    {
+        SetEntityRenderMode(entity, RENDER_TRANSCOLOR);
+        SetEntityRenderColor(entity, r, g, b, 255);
+    }
+}
+
 void OpenEquipMenu(int client)
 {
+    int level = Leveling_GetLevel(client);
+    int xp = Leveling_GetXP(client);
+    int xpNeeded = Leveling_GetXPForLevel(level);
+
     Menu menu = new Menu(Handler_EquipMenu);
-    menu.SetTitle("Cosmetics (Level %d)", Leveling_GetLevel(client));
+
+    if (xpNeeded > 0)
+    {
+        // Build a small XP progress bar: [████░░░░░░] 43%
+        int percent = (xp * 100) / xpNeeded;
+        if (percent > 100) percent = 100;
+        int filled = percent / 10;
+
+        char bar[32];
+        for (int i = 0; i < 10; i++)
+            StrCat(bar, sizeof(bar), (i < filled) ? "█" : "░");
+
+        menu.SetTitle("═══ Cosmetics ═══\n  Your Unlockables\n \n  Level %d  ─  %d / %d XP\n  [%s] %d%%\n ", level, xp, xpNeeded, bar, percent);
+    }
+    else
+    {
+        menu.SetTitle("═══ Cosmetics ═══\n  Your Unlockables\n \n  Level %d  ─  MAX\n ", level);
+    }
 
     char info[8];
     IntToString(view_as<int>(Cosmetic_Trail), info, sizeof(info));
-    menu.AddItem(info, "Trails");
+    menu.AddItem(info, "✦ Trails");
     IntToString(view_as<int>(Cosmetic_Aura), info, sizeof(info));
-    menu.AddItem(info, "Auras");
+    menu.AddItem(info, "✦ Auras");
     IntToString(view_as<int>(Cosmetic_Model), info, sizeof(info));
-    menu.AddItem(info, "Models");
+    menu.AddItem(info, "✦ Models");
     IntToString(view_as<int>(Cosmetic_Sheen), info, sizeof(info));
-    menu.AddItem(info, "Sheens");
+    menu.AddItem(info, "✦ Sheens");
     IntToString(view_as<int>(Cosmetic_Killstreaker), info, sizeof(info));
-    menu.AddItem(info, "Killstreakers");
+    menu.AddItem(info, "✦ Killstreakers");
     IntToString(view_as<int>(Cosmetic_Death), info, sizeof(info));
-    menu.AddItem(info, "Death Effects");
+    menu.AddItem(info, "✦ Death Effects");
     IntToString(view_as<int>(Cosmetic_Pet), info, sizeof(info));
-    menu.AddItem(info, "Pets");
+    menu.AddItem(info, "✦ Pets");
     IntToString(view_as<int>(Cosmetic_Spawn), info, sizeof(info));
-    menu.AddItem(info, "Spawn Particles");
-    menu.AddItem("unequip", "Unequip All");
+    menu.AddItem(info, "✦ Spawn Particles");
+    menu.AddItem("unequip", "✖ Unequip All");
     menu.Display(client, MENU_TIME_FOREVER);
 }
 
@@ -931,12 +1152,12 @@ void OpenCosmeticList(int client, CosmeticType type)
     }
 
     Menu menu = new Menu(Handler_CosmeticList);
-    menu.SetTitle("Select %s", title);
+    menu.SetTitle("═══ %s ═══\n ", title);
 
     // Per-type unequip option
     char unequipInfo[16];
     Format(unequipInfo, sizeof(unequipInfo), "%d|", view_as<int>(type));
-    menu.AddItem(unequipInfo, "-- Unequip --");
+    menu.AddItem(unequipInfo, "✖ Unequip");
 
     ArrayList list = null;
     switch (type)
@@ -974,18 +1195,38 @@ void OpenCosmeticList(int client, CosmeticType type)
             {
                 char display[128];
                 if (isEquipped)
-                    Format(display, sizeof(display), "★ %s", item.name);
+                    Format(display, sizeof(display), "► %s  ◄", item.name);
                 else
                     strcopy(display, sizeof(display), item.name);
+
+                // Append description for pets if available
+                if (type == Cosmetic_Pet && i < g_PetDataList.Length)
+                {
+                    PetData pd;
+                    g_PetDataList.GetArray(i, pd);
+                    if (pd.desc[0] != '\0')
+                        Format(display, sizeof(display), "%s\n    %s", display, pd.desc);
+                }
+
                 menu.AddItem(info, display);
             }
             else
             {
                 char display[128];
                 if (!hasFlag)
-                    Format(display, sizeof(display), "%s (VIP Only)", item.name);
+                    Format(display, sizeof(display), "%s  ◆ VIP", item.name);
                 else
-                    Format(display, sizeof(display), "%s (Locked - Lvl %d)", item.name, item.level);
+                    Format(display, sizeof(display), "%s  ◇ Lvl %d", item.name, item.level);
+
+                // Append description for pets if available
+                if (type == Cosmetic_Pet && i < g_PetDataList.Length)
+                {
+                    PetData pd;
+                    g_PetDataList.GetArray(i, pd);
+                    if (pd.desc[0] != '\0')
+                        Format(display, sizeof(display), "%s\n    %s", display, pd.desc);
+                }
+
                 menu.AddItem("", display, ITEMDRAW_DISABLED);
             }
         }
@@ -1034,37 +1275,41 @@ public int Handler_CosmeticList(Menu menu, MenuAction action, int param1, int pa
             return 0;
         }
 
-        // Remove the old entity of this specific type before applying new one
+        // Remove the old entity of this specific type before applying new one.
+        // Only create visual entities if the player is alive — the DB save
+        // already happened above, so ApplyCosmetics() on next spawn will apply it.
+        bool alive = IsPlayerAlive(param1);
+
         switch (type)
         {
             case Cosmetic_Trail:
             {
                 RemoveTrail(param1);
-                CreateTrail(param1, value);
+                if (alive) CreateTrail(param1, value);
                 CPrintToChat(param1, "%t", "Trail_Equipped", display);
             }
             case Cosmetic_Aura:
             {
                 RemoveAura(param1);
-                CreateAura(param1, value);
+                if (alive) CreateAura(param1, value);
                 CPrintToChat(param1, "%t", "Aura_Equipped", display);
             }
             case Cosmetic_Model:
             {
                 RestoreModel(param1);
-                SetPlayerModel(param1, value);
+                if (alive) SetPlayerModel(param1, value);
                 CPrintToChat(param1, "%t", "Model_Equipped", display);
             }
             case Cosmetic_Sheen:
             {
                 RemoveEyeEffects(param1);
-                CreateEyeEffects(param1);
+                if (alive) CreateEyeEffects(param1);
                 CPrintToChat(param1, "%t", "Sheen_Equipped", display);
             }
             case Cosmetic_Killstreaker:
             {
                 RemoveEyeEffects(param1);
-                CreateEyeEffects(param1);
+                if (alive) CreateEyeEffects(param1);
                 CPrintToChat(param1, "%t", "Killstreaker_Equipped", display);
             }
             case Cosmetic_Death:
@@ -1074,13 +1319,12 @@ public int Handler_CosmeticList(Menu menu, MenuAction action, int param1, int pa
             case Cosmetic_Pet:
             {
                 RemovePet(param1);
-                CreatePet(param1, value);
+                if (alive) CreatePet(param1, value);
                 CPrintToChat(param1, "%t", "Pet_Equipped", display);
             }
             case Cosmetic_Spawn:
             {
-                // Preview it immediately
-                CreateSpawnParticle(param1, value);
+                if (alive) CreateSpawnParticle(param1, value);
                 CPrintToChat(param1, "%t", "Spawn_Equipped", display);
             }
         }
@@ -1108,6 +1352,7 @@ void LoadCosmetics()
     g_KillstreakerList.Clear();
     g_DeathList.Clear();
     g_PetList.Clear();
+    g_PetDataList.Clear();
     g_SpawnList.Clear();
 
     char path[PLATFORM_MAX_PATH];
@@ -1161,15 +1406,39 @@ void ParseSection(KeyValues kv, const char[] section, ArrayList list, const char
                 item.lifetime = kv.GetFloat("lifetime", 2.0);
             }
 
-            // Optional Pet parameters (animations, height, scale)
+            // Pet extended data — stored in parallel PetData ArrayList
             if (StrEqual(section, "Pets"))
             {
-                kv.GetString("anim_idle", item.animIdle, sizeof(item.animIdle), "");
-                kv.GetString("anim_walk", item.animWalk, sizeof(item.animWalk), "");
-                kv.GetString("anim_jump", item.animJump, sizeof(item.animJump), "");
-                item.heightType = kv.GetNum("height_type", 1);
-                item.heightCustom = kv.GetNum("height_custom", 0);
-                item.modelScale = kv.GetFloat("modelscale", 0.5);
+                PetData pd;
+                kv.GetString("anim_idle", pd.animIdle, sizeof(pd.animIdle), "");
+                kv.GetString("anim_walk", pd.animWalk, sizeof(pd.animWalk), "");
+                kv.GetString("anim_jump", pd.animJump, sizeof(pd.animJump), "");
+                pd.heightType = kv.GetNum("height_type", 1);
+                pd.heightCustom = kv.GetNum("height_custom", 0);
+                pd.modelScale = kv.GetFloat("modelscale", 0.5);
+                kv.GetString("desc", pd.desc, sizeof(pd.desc), "");
+                pd.pitch = kv.GetNum("pitch", 100);
+                pd.volume = kv.GetFloat("volume", 0.5);
+                pd.skin = kv.GetNum("skin", 0);
+                pd.skins = kv.GetNum("skins", 1);
+                pd.canBeColored = (kv.GetNum("can_be_colored", 1) == 1);
+
+                pd.soundIdleCount = kv.GetNum("sound_idle_amount", 0);
+                if (pd.soundIdleCount > PET_MAX_IDLE_SOUNDS) pd.soundIdleCount = PET_MAX_IDLE_SOUNDS;
+                if (pd.soundIdleCount >= 1)  kv.GetString("sound_idle",    pd.soundIdle0, PET_SOUND_PATH_LEN, "");
+                if (pd.soundIdleCount >= 2)  kv.GetString("sound_idle_2",  pd.soundIdle1, PET_SOUND_PATH_LEN, "");
+                if (pd.soundIdleCount >= 3)  kv.GetString("sound_idle_3",  pd.soundIdle2, PET_SOUND_PATH_LEN, "");
+                if (pd.soundIdleCount >= 4)  kv.GetString("sound_idle_4",  pd.soundIdle3, PET_SOUND_PATH_LEN, "");
+                if (pd.soundIdleCount >= 5)  kv.GetString("sound_idle_5",  pd.soundIdle4, PET_SOUND_PATH_LEN, "");
+                if (pd.soundIdleCount >= 6)  kv.GetString("sound_idle_6",  pd.soundIdle5, PET_SOUND_PATH_LEN, "");
+                if (pd.soundIdleCount >= 7)  kv.GetString("sound_idle_7",  pd.soundIdle6, PET_SOUND_PATH_LEN, "");
+                if (pd.soundIdleCount >= 8)  kv.GetString("sound_idle_8",  pd.soundIdle7, PET_SOUND_PATH_LEN, "");
+                if (pd.soundIdleCount >= 9)  kv.GetString("sound_idle_9",  pd.soundIdle8, PET_SOUND_PATH_LEN, "");
+                if (pd.soundIdleCount >= 10) kv.GetString("sound_idle_10", pd.soundIdle9, PET_SOUND_PATH_LEN, "");
+                kv.GetString("sound_jumping", pd.soundJump, sizeof(pd.soundJump), "");
+                kv.GetString("sound_walking", pd.soundWalk, sizeof(pd.soundWalk), "");
+
+                g_PetDataList.PushArray(pd);
             }
             
             list.PushArray(item);
@@ -1201,6 +1470,25 @@ void PrecacheCosmetics()
         CosmeticItem item;
         g_PetList.GetArray(i, item);
         if (item.value[0] != '\0') PrecacheModel(item.value, true);
+
+        // Precache pet sounds from PetData
+        if (i < g_PetDataList.Length)
+        {
+            PetData pd;
+            g_PetDataList.GetArray(i, pd);
+            if (pd.soundIdle0[0] != '\0') PrecacheSound(pd.soundIdle0, true);
+            if (pd.soundIdle1[0] != '\0') PrecacheSound(pd.soundIdle1, true);
+            if (pd.soundIdle2[0] != '\0') PrecacheSound(pd.soundIdle2, true);
+            if (pd.soundIdle3[0] != '\0') PrecacheSound(pd.soundIdle3, true);
+            if (pd.soundIdle4[0] != '\0') PrecacheSound(pd.soundIdle4, true);
+            if (pd.soundIdle5[0] != '\0') PrecacheSound(pd.soundIdle5, true);
+            if (pd.soundIdle6[0] != '\0') PrecacheSound(pd.soundIdle6, true);
+            if (pd.soundIdle7[0] != '\0') PrecacheSound(pd.soundIdle7, true);
+            if (pd.soundIdle8[0] != '\0') PrecacheSound(pd.soundIdle8, true);
+            if (pd.soundIdle9[0] != '\0') PrecacheSound(pd.soundIdle9, true);
+            if (pd.soundJump[0] != '\0') PrecacheSound(pd.soundJump, true);
+            if (pd.soundWalk[0] != '\0') PrecacheSound(pd.soundWalk, true);
+        }
     }
 }
 
@@ -1219,5 +1507,6 @@ public void OnPluginEnd()
     delete g_KillstreakerList;
     delete g_DeathList;
     delete g_PetList;
+    delete g_PetDataList;
     delete g_SpawnList;
 }

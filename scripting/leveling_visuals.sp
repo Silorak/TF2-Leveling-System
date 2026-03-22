@@ -3,10 +3,11 @@
 
 #include <sourcemod>
 #include <sdktools>
+#include <colorvariables>
 #include <leveling>
 
 #define PLUGIN_NAME    "[Leveling] Visuals"
-#define PLUGIN_VERSION "1.4.0"
+#define PLUGIN_VERSION "1.5.0"
 
 #define FFADE_IN 0x0001
 
@@ -25,6 +26,7 @@ bool   g_HudEnabled[MAXPLAYERS + 1]; // Per-player XP HUD toggle (default: on)
 public void OnPluginStart()
 {
     g_HudSync = CreateHudSynchronizer();
+    LoadTranslations("leveling.phrases");
 
     RegConsoleCmd("sm_xphud", Cmd_ToggleHud, "Toggle the XP bar HUD on/off");
 }
@@ -41,10 +43,10 @@ public Action Cmd_ToggleHud(int client, int args)
     g_HudEnabled[client] = !g_HudEnabled[client];
 
     if (g_HudEnabled[client])
-        PrintToChat(client, "\x04[Leveling]\x01 XP bar \x04enabled\x01.");
+        CPrintToChat(client, "%t", "XPBar_Enabled");
     else
     {
-        PrintToChat(client, "\x04[Leveling]\x01 XP bar \x02disabled\x01.");
+        CPrintToChat(client, "%t", "XPBar_Disabled");
         ClearSyncHud(client, g_HudSync); // Immediately wipe it from screen
     }
 
