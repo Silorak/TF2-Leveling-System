@@ -619,7 +619,7 @@ void DB_SaveUser(int client)
     g_Database.Escape(g_CustomWelcome[client], sw, sizeof(sw));
     g_Database.Escape(g_CustomTag[client],     sct, sizeof(sct));
 
-    char query[2048];
+    char query[3072];
     g_Database.Format(query, sizeof(query),
         "UPDATE %s SET name='%s', level=%d, xp=%d, total_kills=%d, "
     ... "equipped_trail='%s', equipped_aura='%s', equipped_model='%s', equipped_tag='%s', "
@@ -681,7 +681,7 @@ public Action Timer_AutoSave(Handle timer)
         g_Database.Escape(g_CustomWelcome[client], sw, sizeof(sw));
         g_Database.Escape(g_CustomTag[client],     sct, sizeof(sct));
 
-        char query[2048];
+        char query[3072];
         g_Database.Format(query, sizeof(query),
             "UPDATE %s SET name='%s', level=%d, xp=%d, total_kills=%d, "
         ... "equipped_trail='%s', equipped_aura='%s', equipped_model='%s', equipped_tag='%s', "
